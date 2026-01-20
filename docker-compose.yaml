@@ -1,0 +1,29 @@
+version: '3.8'
+services:
+  db:
+    # On construit l'image locale au lieu d'utiliser l'image brute
+    build:
+      context: ./database
+    container_name: hooked-db-built
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hooked_user
+      POSTGRES_PASSWORD: hooked_password
+      POSTGRES_DB: hooked_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # PLUS DE MONTAGE init.sql ICI ! C'est géré par le build.
+
+  adminer:
+    image: adminer
+    container_name: hooked-adminer
+    restart: always
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:
