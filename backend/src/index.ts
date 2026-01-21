@@ -1,10 +1,14 @@
 import fastify from 'fastify';
 import cors from '@fastify/cors';
-import postgres from '@fastify/postgres';
 import dotenv from 'dotenv';
-import { authRoutes } from './routes/auth'; // <--- Import de nos routes
+import { PrismaClient } from '@prisma/client';
+import { authRoutes } from './routes/auth';
 
 dotenv.config();
+
+// SIMPLIFICATION : Plus besoin de passer datasources ici.
+// Prisma lit automatiquement le .env grâce au schema.prisma
+export const prisma = new PrismaClient();
 
 const server = fastify({ logger: true });
 
@@ -12,16 +16,19 @@ const start = async () => {
   try {
     // 1. Plugins Globaux
     await server.register(cors, { origin: '*' });
-    await server.register(postgres, { connectionString: process.env.DATABASE_URL });
 
     // 2. Enregistrement des Routes
-    // Toutes les routes dans auth.ts seront préfixées par "/auth"
-    // Ex: /register devient /auth/register
     await server.register(authRoutes, { prefix: '/auth' });
 
-    // 3. Route de Santé (Toujours utile)
+    // 3. Route de Santé
     server.get('/', async () => {
       return { status: 'online', system: 'Hooked API 🧶' };
+    });
+
+    // Route Categories (Test Prisma)
+    server.get('/categories', async () => {
+      const categories = await prisma.categories.findMany({ orderBy: { label: 'asc' } });
+      return categories;
     });
 
     // 4. Lancement
@@ -33,6 +40,7 @@ const start = async () => {
 
   } catch (err) {
     server.log.error(err);
+    await prisma.$disconnect();
     process.exit(1);
   }
 };
