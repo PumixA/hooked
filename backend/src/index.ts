@@ -6,6 +6,8 @@ import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
 import { authRoutes } from './routes/auth';
 import { usersRoutes } from './routes/users';
+import { projectsRoutes } from './routes/projects'; // <--- AJOUT
+import { materialsRoutes } from './routes/materials'; // <--- AJOUT
 
 dotenv.config();
 
@@ -36,7 +38,11 @@ const start = async () => {
     await server.register(authRoutes, { prefix: '/auth' });
     await server.register(usersRoutes, { prefix: '/users' });
 
-    // 5. Routes API
+    // NOUVELLES ROUTES (HOOK-34)
+    await server.register(projectsRoutes, { prefix: '/projects' });
+    await server.register(materialsRoutes, { prefix: '/materials' });
+
+    // 5. Routes API Publiques / Utilitaires
     server.get('/', async () => {
       return { status: 'online', system: 'Hooked API 🧶' };
     });
