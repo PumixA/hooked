@@ -1,5 +1,6 @@
 import fastify from 'fastify';
 import cors from '@fastify/cors';
+import jwt from '@fastify/jwt'; // <--- AJOUT IMPORTANT
 import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
 import { authRoutes } from './routes/auth';
@@ -17,10 +18,16 @@ const start = async () => {
     // 1. Plugins Globaux
     await server.register(cors, { origin: '*' });
 
-    // 2. Enregistrement des Routes
+    // 2. Configuration JWT (JSON Web Token)
+    // Cela permet de signer et vérifier les tokens d'authentification
+    await server.register(jwt, {
+      secret: process.env.JWT_SECRET || 'secret_par_defaut_a_changer_absolument'
+    });
+
+    // 3. Enregistrement des Routes
     await server.register(authRoutes, { prefix: '/auth' });
 
-    // 3. Route de Santé
+    // 4. Route de Santé
     server.get('/', async () => {
       return { status: 'online', system: 'Hooked API 🧶' };
     });
@@ -31,7 +38,7 @@ const start = async () => {
       return categories;
     });
 
-    // 4. Lancement
+    // 5. Lancement
     const port = Number(process.env.PORT) || 3000;
     const host = process.env.HOST || '0.0.0.0';
 
