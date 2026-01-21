@@ -1,3 +1,4 @@
+/// <reference path="../types/fastify-jwt.d.ts" />
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import bcrypt from 'bcrypt';
@@ -27,8 +28,7 @@ export async function authRoutes(server: FastifyInstance) {
         if (!result.success) {
             return reply.code(400).send({
                 error: "Données invalides",
-                // CORRECTION ICI : .issues au lieu de .errors
-                details: result.error.issues
+                details: result.error.issues // Utilisation de .issues pour Zod
             });
         }
 
@@ -105,7 +105,8 @@ export async function authRoutes(server: FastifyInstance) {
             const token = server.jwt.sign({
                 id: user.id,
                 email: user.email,
-                role: user.role
+                // CORRECTION ICI : Si le rôle est null, on force 'user'
+                role: user.role || 'user'
             });
 
             // 5. Réponse
