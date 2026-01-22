@@ -1,14 +1,15 @@
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { useState } from 'react';
-import { Loader2, AlertCircle } from 'lucide-react';
-import clsx from 'clsx';
+import { AlertCircle } from 'lucide-react';
+// IMPORT DES NOUVEAUX COMPOSANTS
+import Button from '../components/ui/Button';
+import Input from '../components/ui/Input';
 
 export default function Login() {
     const { login } = useAuth();
     const navigate = useNavigate();
 
-    // États pour gérer l'expérience utilisateur (chargement et erreurs)
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [isLoading, setIsLoading] = useState(false);
@@ -16,14 +17,13 @@ export default function Login() {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        setError(null);      // On efface les anciennes erreurs
-        setIsLoading(true);  // On active le mode chargement
+        setError(null);
+        setIsLoading(true);
 
         try {
             await login(email, password);
             navigate('/');
         } catch (err) {
-            // En cas d'échec, on arrête le chargement et on affiche l'erreur
             setError("Email ou mot de passe incorrect.");
             setIsLoading(false);
         }
@@ -33,7 +33,7 @@ export default function Login() {
         <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6 text-white">
             <div className="w-full max-w-sm animate-fade-in">
 
-                {/* Logo & Titre */}
+                {/* Header */}
                 <div className="flex flex-col items-center mb-10">
                     <img src="/logo-mini.svg" alt="Hooked" className="w-24 h-24 mb-6" />
                     <h1 className="text-gray-400 text-lg font-medium">Suivi de projets crochet</h1>
@@ -41,7 +41,7 @@ export default function Login() {
 
                 <form onSubmit={handleSubmit} className="space-y-4">
 
-                    {/* Zone d'affichage de l'erreur */}
+                    {/* Gestion d'erreur */}
                     {error && (
                         <div className="bg-red-500/10 border border-red-500/50 text-red-400 p-3 rounded-xl flex items-center gap-2 text-sm">
                             <AlertCircle size={18} />
@@ -49,46 +49,32 @@ export default function Login() {
                         </div>
                     )}
 
-                    <div className="space-y-4">
-                        <input
-                            type="email"
-                            placeholder="Adresse e-mail"
-                            required
-                            disabled={isLoading}
-                            className="w-full p-4 rounded-xl bg-secondary border border-zinc-800 text-white placeholder-zinc-500 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all disabled:opacity-50"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                        />
-                        <input
-                            type="password"
-                            placeholder="Mot de passe"
-                            required
-                            disabled={isLoading}
-                            className="w-full p-4 rounded-xl bg-secondary border border-zinc-800 text-white placeholder-zinc-500 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all disabled:opacity-50"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                        />
-                    </div>
-
-                    <button
-                        type="submit"
+                    {/* COMPOSANTS UI KIT : Beaucoup plus propre ! */}
+                    <Input
+                        type="email"
+                        placeholder="Adresse e-mail"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
                         disabled={isLoading}
-                        className={clsx(
-                            "w-full font-bold py-4 rounded-xl transition-all flex items-center justify-center gap-2",
-                            isLoading
-                                ? "bg-zinc-700 text-zinc-400 cursor-not-allowed"
-                                : "bg-primary text-background hover:opacity-90 active:scale-[0.98]"
-                        )}
+                        required
+                    />
+
+                    <Input
+                        type="password"
+                        placeholder="Mot de passe"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        disabled={isLoading}
+                        required
+                    />
+
+                    <Button
+                        type="submit"
+                        isLoading={isLoading}
+                        className="mt-4"
                     >
-                        {isLoading ? (
-                            <>
-                                <Loader2 className="animate-spin" size={20} />
-                                <span>Connexion...</span>
-                            </>
-                        ) : (
-                            "Ouvrir mon atelier"
-                        )}
-                    </button>
+                        Ouvrir mon atelier
+                    </Button>
                 </form>
 
                 <p className="text-center text-xs text-zinc-600 mt-12">
