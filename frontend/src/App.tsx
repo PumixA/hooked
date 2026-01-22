@@ -5,7 +5,8 @@ import Dashboard from './pages/Dashboard';
 import Inventory from './pages/Inventory';
 import Settings from './pages/Settings';
 import ProjectCreate from './pages/ProjectCreate';
-import ProjectDetail from './pages/ProjectDetail'; // <--- AJOUT : Import de la page détail
+import ProjectDetail from './pages/ProjectDetail';
+import MaterialCreate from './pages/MaterialCreate'; // <--- AJOUT : Import Page création matériel
 import { useAuth } from './context/AuthContext';
 
 // Petit wrapper pour empêcher d'aller sur Login si on est déjà connecté
@@ -28,13 +29,15 @@ function App() {
             {/* Routes Privées (Protégées par le Layout) */}
             <Route element={<AppLayout />}>
                 <Route path="/" element={<Dashboard />} />
+
+                {/* INVENTAIRE */}
                 <Route path="/inventory" element={<Inventory />} />
+                <Route path="/inventory/new" element={<MaterialCreate />} /> {/* <--- AJOUT : Route Ajout */}
+
                 <Route path="/settings" element={<Settings />} />
 
-                {/* Création de projet */}
+                {/* PROJETS */}
                 <Route path="/projects/new" element={<ProjectCreate />} />
-
-                {/* AJOUT : Route dynamique pour le compteur (Détail projet) */}
                 <Route path="/projects/:id" element={<ProjectDetail />} />
             </Route>
 
