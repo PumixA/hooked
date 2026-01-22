@@ -29,9 +29,9 @@ export async function projectsRoutes(server: FastifyInstance) {
 
         const projects = await prisma.projects.findMany({
             where: { user_id: userId },
-            orderBy: { updated_at: 'desc' }, // Les plus récents en premier
+            orderBy: { updated_at: 'desc' },
             include: {
-                categories: true // On récupère aussi le label de la catégorie
+                categories: true
             }
         });
 
@@ -63,7 +63,29 @@ export async function projectsRoutes(server: FastifyInstance) {
         }
     });
 
-    // 3. METTRE À JOUR UN PROJET (PATCH /projects/:id)
+    // 3. VOIR UN PROJET (GET /projects/:id) <--- C'EST CETTE ROUTE QUI MANQUAIT
+    server.get('/:id', async (request, reply) => {
+        const { id } = request.params as { id: string };
+        const userId = request.user.id;
+
+        const project = await prisma.projects.findFirst({
+            where: {
+                id: id,
+                user_id: userId // Sécurité : on vérifie que c'est bien son projet
+            },
+            include: {
+                categories: true
+            }
+        });
+
+        if (!project) {
+            return reply.code(404).send({ error: "Projet introuvable" });
+        }
+
+        return project;
+    });
+
+    // 4. METTRE À JOUR UN PROJET (PATCH /projects/:id)
     server.patch('/:id', async (request, reply) => {
         const { id } = request.params as { id: string };
         const result = updateProjectSchema.safeParse(request.body);
@@ -82,7 +104,8 @@ export async function projectsRoutes(server: FastifyInstance) {
                 where: { id },
                 data: {
                     ...result.data,
-                    updated_at: new Date() // On force la date de maj
+                    // Si le frontend envoie une date updated_at (synchro), on la prend, sinon Date.now()
+                    updated_at: result.data.updated_at ? result.data.updated_at : new Date()
                 }
             });
             return updated;
