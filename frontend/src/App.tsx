@@ -4,7 +4,8 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Inventory from './pages/Inventory';
 import Settings from './pages/Settings';
-import ProjectCreate from './pages/ProjectCreate'; // <--- NOUVEL IMPORT
+import ProjectCreate from './pages/ProjectCreate';
+import ProjectDetail from './pages/ProjectDetail'; // <--- AJOUT : Import de la page détail
 import { useAuth } from './context/AuthContext';
 
 // Petit wrapper pour empêcher d'aller sur Login si on est déjà connecté
@@ -30,8 +31,11 @@ function App() {
                 <Route path="/inventory" element={<Inventory />} />
                 <Route path="/settings" element={<Settings />} />
 
-                {/* NOUVELLE ROUTE : Création de projet */}
+                {/* Création de projet */}
                 <Route path="/projects/new" element={<ProjectCreate />} />
+
+                {/* AJOUT : Route dynamique pour le compteur (Détail projet) */}
+                <Route path="/projects/:id" element={<ProjectDetail />} />
             </Route>
 
             {/* Redirection par défaut */}

@@ -63,7 +63,6 @@ export default function Dashboard() {
                     <h1 className="text-2xl font-bold text-white">Bonjour !</h1>
                 </div>
                 <div className="flex items-center gap-3">
-                    {/* Indicateur de synchro (statique pour l'instant) */}
                     <div className="flex items-center gap-1 text-[10px] text-green-400 font-medium bg-green-400/10 px-2 py-1 rounded-full">
                         <Cloud size={12} />
                         <span>Sync</span>
@@ -103,10 +102,10 @@ export default function Dashboard() {
                     {/* A. Le dernier projet mis en avant (Grande carte) */}
                     {lastProject && (
                         <div
+                            // CORRECTION ICI : Utilisation de backticks ` ` au lieu de ' '
                             onClick={() => navigate(`/projects/${lastProject.id}`)}
                             className="relative overflow-hidden bg-secondary p-5 rounded-3xl border border-primary/30 shadow-[0_0_20px_-5px_rgba(196,181,253,0.2)] cursor-pointer active:scale-[0.98] transition-all"
                         >
-                            {/* Décoration de fond */}
                             <div className="absolute top-0 right-0 p-3 opacity-5 pointer-events-none">
                                 <img src="/logo-mini.svg" className="w-24 h-24" />
                             </div>
@@ -117,7 +116,6 @@ export default function Dashboard() {
 
                             <h3 className="text-2xl font-bold text-white mb-2">{lastProject.title}</h3>
 
-                            {/* Barre de progression */}
                             <div className="mt-6">
                                 <div className="flex justify-between text-xs text-zinc-400 mb-2 font-medium">
                                     <span>Progression</span>
@@ -139,6 +137,7 @@ export default function Dashboard() {
                             {otherProjects.map((proj) => (
                                 <Card
                                     key={proj.id}
+                                    // CORRECTION ICI AUSSI : Utilisation de backticks ` `
                                     onClick={() => navigate(`/projects/${proj.id}`)}
                                     className="p-4 active:scale-[0.95] transition-transform flex flex-col justify-between h-32"
                                 >
@@ -156,8 +155,6 @@ export default function Dashboard() {
                 </>
             )}
 
-            {/* --- FAB (Bouton Flottant Ajouter) --- */}
-            {/* CORRECTION : Redirection vers la nouvelle page de création */}
             <button
                 onClick={() => navigate('/projects/new')}
                 className="fixed bottom-24 right-6 w-14 h-14 bg-primary text-background rounded-full flex items-center justify-center shadow-lg hover:scale-110 active:scale-90 transition-all z-40"
