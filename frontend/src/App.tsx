@@ -4,6 +4,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Inventory from './pages/Inventory';
 import Settings from './pages/Settings';
+import ProjectCreate from './pages/ProjectCreate'; // <--- NOUVEL IMPORT
 import { useAuth } from './context/AuthContext';
 
 // Petit wrapper pour empêcher d'aller sur Login si on est déjà connecté
@@ -28,6 +29,9 @@ function App() {
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/inventory" element={<Inventory />} />
                 <Route path="/settings" element={<Settings />} />
+
+                {/* NOUVELLE ROUTE : Création de projet */}
+                <Route path="/projects/new" element={<ProjectCreate />} />
             </Route>
 
             {/* Redirection par défaut */}

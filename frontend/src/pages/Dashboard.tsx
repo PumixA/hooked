@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Settings, Plus, Loader2, Cloud, Clock } from 'lucide-react';
 import api from '../services/api';
-import Card from '../components/ui/Card'; // On utilise ton composant UI Kit
+import Card from '../components/ui/Card';
 
 // Type simplifié pour un projet
 interface Project {
@@ -112,8 +112,8 @@ export default function Dashboard() {
                             </div>
 
                             <span className="inline-block bg-primary/20 text-primary text-[10px] px-3 py-1 rounded-full font-bold uppercase tracking-wider mb-3">
-                        Dernier projet
-                    </span>
+                                Dernier projet
+                            </span>
 
                             <h3 className="text-2xl font-bold text-white mb-2">{lastProject.title}</h3>
 
@@ -157,9 +157,9 @@ export default function Dashboard() {
             )}
 
             {/* --- FAB (Bouton Flottant Ajouter) --- */}
-            {/* Note : Pour l'instant, il ne fait qu'un log console, la création est au prochain ticket */}
+            {/* CORRECTION : Redirection vers la nouvelle page de création */}
             <button
-                onClick={() => console.log("Vers création projet ->")}
+                onClick={() => navigate('/projects/new')}
                 className="fixed bottom-24 right-6 w-14 h-14 bg-primary text-background rounded-full flex items-center justify-center shadow-lg hover:scale-110 active:scale-90 transition-all z-40"
             >
                 <Plus size={32} strokeWidth={2.5} />
