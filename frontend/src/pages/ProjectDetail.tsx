@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2 } from 'lucide-react';
+import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings } from 'lucide-react';
 import api from '../services/api';
-// IMPORTS AJOUTÉS
 import Timer from '../components/features/Timer';
 import Modal from '../components/ui/Modal';
 import Button from '../components/ui/Button';
+import Input from '../components/ui/Input';
 
 interface Project {
     id: string;
@@ -21,9 +21,16 @@ export default function ProjectDetail() {
     const [project, setProject] = useState<Project | null>(null);
     const [loading, setLoading] = useState(true);
 
+    // ÉTATS LOCAUX
+    const [step, setStep] = useState(1); // Le "Pas" par défaut est 1
+
     // ÉTATS POUR LES MODALES
     const [showNotes, setShowNotes] = useState(false);
     const [showPhotos, setShowPhotos] = useState(false);
+    const [showSettings, setShowSettings] = useState(false); // Nouvelle modale réglages
+
+    // État temporaire pour l'édition de l'objectif dans la modale
+    const [tempGoal, setTempGoal] = useState<string>('');
 
     useEffect(() => {
         fetchProject();
@@ -33,6 +40,8 @@ export default function ProjectDetail() {
         try {
             const { data } = await api.get(`/projects/${id}`);
             setProject(data);
+            // On initialise l'input de l'objectif
+            if (data.goal_rows) setTempGoal(data.goal_rows.toString());
         } catch (error) {
             console.error("Erreur chargement projet", error);
             navigate('/');
@@ -41,20 +50,38 @@ export default function ProjectDetail() {
         }
     };
 
-    const updateCounter = async (increment: number) => {
+    // Fonction centralisée pour sauvegarder les modifs (Compteur ou Objectif)
+    const saveProjectChanges = async (updates: Partial<Project>) => {
         if (!project) return;
 
-        const newCount = Math.max(0, project.current_row + increment);
-        setProject({ ...project, current_row: newCount });
+        // 1. Optimistic UI : Mise à jour immédiate
+        setProject({ ...project, ...updates });
 
+        // 2. Envoi API
         try {
             await api.patch(`/projects/${project.id}`, {
-                current_row: newCount,
+                ...updates,
                 updated_at: new Date().toISOString()
             });
         } catch (error) {
-            console.error("Erreur sauvegarde compteur", error);
+            console.error("Erreur sauvegarde", error);
         }
+    };
+
+    const updateCounter = (increment: number) => {
+        if (!project) return;
+        // On multiplie l'incrément (+1 ou -1) par le "Pas" (step)
+        const amount = increment * step;
+        const newCount = Math.max(0, project.current_row + amount);
+
+        saveProjectChanges({ current_row: newCount });
+    };
+
+    const handleSaveSettings = () => {
+        // Conversion de l'input string en nombre (ou undefined si vide)
+        const newGoal = tempGoal ? parseInt(tempGoal) : undefined;
+        saveProjectChanges({ goal_rows: newGoal });
+        setShowSettings(false);
     };
 
     if (loading || !project) {
@@ -74,12 +101,20 @@ export default function ProjectDetail() {
                     <ArrowLeft />
                     <span className="text-sm">Retour</span>
                 </button>
+
+                {/* Nouveau Bouton Réglages */}
+                <button
+                    onClick={() => setShowSettings(true)}
+                    className="p-2 rounded-full bg-zinc-800 text-zinc-400 hover:text-white transition"
+                >
+                    <Settings size={20} />
+                </button>
             </div>
 
             {/* --- INFO PROJET & TIMER --- */}
             <div className="text-center space-y-4 mb-8">
                 <h1 className="text-2xl font-bold">{project.title}</h1>
-                <Timer /> {/* Nouveau Timer fonctionnel */}
+                <Timer />
             </div>
 
             {/* --- COMPTEUR GÉANT --- */}
@@ -88,7 +123,18 @@ export default function ProjectDetail() {
                 <div className="text-[120px] font-bold leading-none tracking-tighter select-none">
                     {project.current_row}
                 </div>
-                <div className="mt-4 text-zinc-500 flex items-center gap-2 cursor-pointer hover:text-zinc-300">
+
+                {/* Badge "Pas" visible seulement si > 1 */}
+                {step > 1 && (
+                    <div className="bg-primary/20 text-primary text-xs px-2 py-1 rounded-full mt-2 font-bold mb-2">
+                        Pas : +/- {step}
+                    </div>
+                )}
+
+                <div
+                    onClick={() => setShowSettings(true)}
+                    className="mt-2 text-zinc-500 flex items-center gap-2 cursor-pointer hover:text-zinc-300 transition p-2 rounded-lg hover:bg-zinc-800/50"
+                >
                     <span>sur {project.goal_rows || '?'} rangs</span>
                     <span className="text-[10px]">✎</span>
                 </div>
@@ -131,7 +177,44 @@ export default function ProjectDetail() {
 
             {/* --- MODALES --- */}
 
-            {/* Modale Notes */}
+            {/* 1. Modale Réglages (NOUVEAU HOOK-47) */}
+            <Modal isOpen={showSettings} onClose={() => setShowSettings(false)} title="Réglages du projet">
+                <div className="space-y-6">
+
+                    {/* Choix du Pas */}
+                    <div className="space-y-2">
+                        <label className="text-xs text-zinc-400 ml-1">Pas d'incrémentation (Boutons +/-)</label>
+                        <div className="flex gap-2">
+                            {[1, 2, 5, 10].map((val) => (
+                                <button
+                                    key={val}
+                                    onClick={() => setStep(val)}
+                                    className={`flex-1 py-3 rounded-xl font-bold transition-all ${
+                                        step === val
+                                            ? 'bg-primary text-background'
+                                            : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+                                    }`}
+                                >
+                                    {val}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Édition de l'objectif */}
+                    <Input
+                        label="Objectif de rangs"
+                        type="number"
+                        value={tempGoal}
+                        onChange={(e) => setTempGoal(e.target.value)}
+                        placeholder="Infini"
+                    />
+
+                    <Button onClick={handleSaveSettings}>Enregistrer</Button>
+                </div>
+            </Modal>
+
+            {/* 2. Modale Notes */}
             <Modal isOpen={showNotes} onClose={() => setShowNotes(false)} title="Notes">
                 <textarea
                     className="w-full h-32 bg-transparent text-white resize-none focus:outline-none placeholder-zinc-600 border-none"
@@ -140,7 +223,7 @@ export default function ProjectDetail() {
                 <Button onClick={() => setShowNotes(false)} className="mt-4">Sauvegarder</Button>
             </Modal>
 
-            {/* Modale Photos */}
+            {/* 3. Modale Photos */}
             <Modal isOpen={showPhotos} onClose={() => setShowPhotos(false)} title="Photos">
                 <div className="border-2 border-dashed border-zinc-700 rounded-xl h-32 flex flex-col items-center justify-center text-zinc-500 hover:border-zinc-500 hover:text-zinc-400 transition cursor-pointer bg-zinc-800/30">
                     <Camera size={32} className="mb-2" />
