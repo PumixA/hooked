@@ -1,4 +1,6 @@
-import axios, { InternalAxiosRequestConfig } from 'axios';
+import axios from 'axios';
+// CORRECTION : Ajout de "type" pour dire à Vite que c'est juste une définition
+import type { InternalAxiosRequestConfig } from 'axios';
 
 const API_URL = 'http://localhost:3000';
 
@@ -9,7 +11,6 @@ const api = axios.create({
     },
 });
 
-// Typage strict pour TypeScript
 api.interceptors.request.use(
     (config: InternalAxiosRequestConfig) => {
         const token = localStorage.getItem('token');
