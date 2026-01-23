@@ -1,5 +1,5 @@
 import { X, Maximize2 } from 'lucide-react';
-import { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 interface ModalProps {
     isOpen: boolean;

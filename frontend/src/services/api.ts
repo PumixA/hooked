@@ -1,6 +1,7 @@
 import axios from 'axios';
 import type { InternalAxiosRequestConfig } from 'axios';
 
+// URL sans le /api comme demandé
 const API_URL = 'http://192.168.1.96:3000';
 
 const api = axios.create({
@@ -8,9 +9,10 @@ const api = axios.create({
     headers: {
         'Content-Type': 'application/json',
     },
+    timeout: 10000, // Timeout pour basculer rapidement sur le cache
 });
 
-// 1. Intercepteur de REQUÊTE (On attache le token sortant)
+// 1. Intercepteur de REQUÊTE
 api.interceptors.request.use(
     (config: InternalAxiosRequestConfig) => {
         const token = localStorage.getItem('token');
@@ -24,25 +26,31 @@ api.interceptors.request.use(
     }
 );
 
-// 2. Intercepteur de RÉPONSE (NOUVEAU : On gère les erreurs entrantes)
+// 2. Intercepteur de RÉPONSE
 api.interceptors.response.use(
     (response) => {
-        // Si la réponse est bonne (200, 201...), on la laisse passer
         return response;
     },
     (error) => {
-        // Si le serveur répond "401 Unauthorized" (Token périmé ou faux)
-        if (error.response && error.response.status === 401) {
+        // --- CAS 1 : MODE HORS-LIGNE (Erreur réseau) ---
+        // Si error.response n'existe pas, c'est que le serveur n'a pas répondu (ou timeout).
+        // On ne déconnecte PAS. On rejette l'erreur pour que l'UI puisse gérer (ex: afficher des données en cache).
+        if (!error.response) {
+            console.warn("Mode Hors-Ligne détecté 📡 - Connexion impossible.");
+            return Promise.reject(error);
+        }
+
+        // --- CAS 2 : SESSION EXPIRÉE (Le serveur répond explicitement 401) ---
+        if (error.response.status === 401) {
             console.warn("Session expirée, déconnexion forcée.");
-
-            // On nettoie le token pourri
             localStorage.removeItem('token');
+            localStorage.removeItem('user'); // Nettoyage des données utilisateur
 
-            // On redirige vers le login (sauf si on y est déjà)
             if (window.location.pathname !== '/login') {
                 window.location.href = '/login';
             }
         }
+
         return Promise.reject(error);
     }
 );

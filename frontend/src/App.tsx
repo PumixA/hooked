@@ -6,8 +6,9 @@ import Inventory from './pages/Inventory';
 import Settings from './pages/Settings';
 import ProjectCreate from './pages/ProjectCreate';
 import ProjectDetail from './pages/ProjectDetail';
-import MaterialCreate from './pages/MaterialCreate'; // <--- AJOUT : Import Page création matériel
+import MaterialCreate from './pages/MaterialCreate';
 import { useAuth } from './context/AuthContext';
+import type { JSX } from 'react';
 
 // Petit wrapper pour empêcher d'aller sur Login si on est déjà connecté
 const PublicRoute = ({ children }: { children: JSX.Element }) => {
@@ -32,7 +33,7 @@ function App() {
 
                 {/* INVENTAIRE */}
                 <Route path="/inventory" element={<Inventory />} />
-                <Route path="/inventory/new" element={<MaterialCreate />} /> {/* <--- AJOUT : Route Ajout */}
+                <Route path="/inventory/new" element={<MaterialCreate />} />
 
                 <Route path="/settings" element={<Settings />} />
 
