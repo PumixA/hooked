@@ -1,18 +1,30 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
-// CORRECTION : Plus d'extension .jsx ici
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'; // <--- IMPORT
 import App from './App';
 import { AuthProvider } from './context/AuthContext';
 import './index.css';
 
-// CORRECTION : Ajout du "!" après getElementById('root')
+// Création du client React Query
+const queryClient = new QueryClient({
+    defaultOptions: {
+        queries: {
+            retry: 1, // Réessaie 1 fois en cas d'erreur réseau
+            staleTime: 1000 * 60 * 5, // Les données restent "fraîches" 5 minutes sans rechargement
+        },
+    },
+});
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
-        <BrowserRouter>
-            <AuthProvider>
-                <App />
-            </AuthProvider>
-        </BrowserRouter>
+        {/* On englobe l'app avec le Provider */}
+        <QueryClientProvider client={queryClient}>
+            <BrowserRouter>
+                <AuthProvider>
+                    <App />
+                </AuthProvider>
+            </BrowserRouter>
+        </QueryClientProvider>
     </React.StrictMode>,
 );

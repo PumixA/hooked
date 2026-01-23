@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query'; // <--- IMPORT HOOK
 import { Settings, Plus, Loader2, Cloud, Clock } from 'lucide-react';
 import api from '../services/api';
 import Card from '../components/ui/Card';
@@ -15,26 +15,17 @@ interface Project {
 
 export default function Dashboard() {
     const navigate = useNavigate();
-    const [projects, setProjects] = useState<Project[]>([]);
-    const [loading, setLoading] = useState(true);
 
-    // 1. Chargement des données au montage du composant
-    useEffect(() => {
-        fetchProjects();
-    }, []);
-
-    const fetchProjects = async () => {
-        try {
+    // REMPLACEMENT : On utilise useQuery au lieu de useState/useEffect
+    const { data: projects = [], isLoading } = useQuery({
+        queryKey: ['projects'], // Clé unique pour le cache
+        queryFn: async () => {
             const { data } = await api.get('/projects');
-            setProjects(data);
-        } catch (error) {
-            console.error("Erreur chargement projets", error);
-        } finally {
-            setLoading(false);
+            return data as Project[];
         }
-    };
+    });
 
-    // 2. Logique de tri : Le plus récent en premier
+    // Logique de tri : Le plus récent en premier
     const sortedProjects = [...projects].sort((a, b) =>
         new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
     );
@@ -44,8 +35,8 @@ export default function Dashboard() {
     // On garde les autres pour la grille
     const otherProjects = sortedProjects.slice(1);
 
-    // État de chargement global
-    if (loading) {
+    // État de chargement global (géré par React Query)
+    if (isLoading) {
         return (
             <div className="flex justify-center items-center h-screen bg-background text-primary">
                 <Loader2 className="animate-spin" size={40} />
@@ -102,7 +93,6 @@ export default function Dashboard() {
                     {/* A. Le dernier projet mis en avant (Grande carte) */}
                     {lastProject && (
                         <div
-                            // CORRECTION ICI : Utilisation de backticks ` ` au lieu de ' '
                             onClick={() => navigate(`/projects/${lastProject.id}`)}
                             className="relative overflow-hidden bg-secondary p-5 rounded-3xl border border-primary/30 shadow-[0_0_20px_-5px_rgba(196,181,253,0.2)] cursor-pointer active:scale-[0.98] transition-all"
                         >
@@ -137,7 +127,6 @@ export default function Dashboard() {
                             {otherProjects.map((proj) => (
                                 <Card
                                     key={proj.id}
-                                    // CORRECTION ICI AUSSI : Utilisation de backticks ` `
                                     onClick={() => navigate(`/projects/${proj.id}`)}
                                     className="p-4 active:scale-[0.95] transition-transform flex flex-col justify-between h-32"
                                 >

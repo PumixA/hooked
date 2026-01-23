@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
+import { useMutation, useQueryClient } from '@tanstack/react-query'; // <--- IMPORTS AJOUTÉS
 import api from '../services/api';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 
 export default function ProjectCreate() {
     const navigate = useNavigate();
-    const [isLoading, setIsLoading] = useState(false);
+    const queryClient = useQueryClient(); // <--- Accès au cache pour l'invalidation
 
     // États du formulaire
     const [title, setTitle] = useState('');
@@ -18,31 +19,41 @@ export default function ProjectCreate() {
     const categories = ["Pull", "Bonnet", "Echarpe", "Couverture", "Gants", "Sac", "Amigurumi", "Autre"];
     const hookSizes = ["2.0mm", "2.5mm", "3.0mm", "3.5mm", "4.0mm", "4.5mm", "5.0mm", "5.5mm", "6.0mm"];
 
-    const handleSubmit = async (e?: React.FormEvent) => {
+    // Définition de la mutation (Action de création)
+    const mutation = useMutation({
+        mutationFn: async (newProject: any) => {
+            return await api.post('/projects', newProject);
+        },
+        onSuccess: () => {
+            // C'EST ICI LA MAGIE : On invalide le cache 'projects'
+            // Le Dashboard rechargera automatiquement la liste fraîche à la prochaine visite
+            queryClient.invalidateQueries({ queryKey: ['projects'] });
+
+            // Retour au Dashboard
+            navigate('/');
+        },
+        onError: (error) => {
+            console.error("Erreur création", error);
+            // Ici on pourrait ajouter un toast d'erreur
+        }
+    });
+
+    const handleSubmit = (e?: React.FormEvent) => {
         // Empêcher le rechargement si déclenché par le formulaire
         if (e) e.preventDefault();
 
         if (!title) return;
-        setIsLoading(true);
 
-        try {
-            // CORRECTION ICI : Si goalRows est vide, on envoie undefined (le champ sera absent du JSON)
-            // Plutôt que null (qui peut être rejeté par le backend qui attend un entier)
-            const payload = {
-                title,
-                goal_rows: goalRows ? parseInt(goalRows) : undefined,
-            };
+        // Préparation des données
+        const payload = {
+            title,
+            // Si goalRows est vide, on envoie undefined pour qu'il soit ignoré
+            goal_rows: goalRows ? parseInt(goalRows) : undefined,
+            // On peut aussi envoyer la catégorie si tu le souhaites (ex: category_id plus tard)
+        };
 
-            await api.post('/projects', payload);
-
-            // Succès -> Retour au Dashboard
-            navigate('/');
-        } catch (error) {
-            console.error("Erreur création", error);
-            // On pourrait afficher un toast d'erreur ici plus tard
-        } finally {
-            setIsLoading(false);
-        }
+        // Lancement de la mutation (remplace le try/catch manuel)
+        mutation.mutate(payload);
     };
 
     return (
@@ -127,7 +138,7 @@ export default function ProjectCreate() {
                 <div className="pt-4">
                     <Button
                         type="submit"
-                        isLoading={isLoading}
+                        isLoading={mutation.isPending} // isPending remplace isLoading dans React Query v5
                         disabled={!title}
                     >
                         Commencer le projet
