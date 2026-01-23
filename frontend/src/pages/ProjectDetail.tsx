@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings, TrendingUp } from 'lucide-react';
-import { useMutation } from '@tanstack/react-query'; // <--- AJOUT
+import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings, TrendingUp, ImagePlus, Eye } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'; // <--- AJOUT useQuery
 import api from '../services/api';
 import Timer from '../components/features/Timer';
 import Modal from '../components/ui/Modal';
@@ -15,9 +15,17 @@ interface Project {
     goal_rows?: number;
 }
 
+// Interface pour les photos (HOOK-54)
+interface Photo {
+    id: string;
+    file_path: string;
+    created_at: string;
+}
+
 export default function ProjectDetail() {
     const { id } = useParams();
     const navigate = useNavigate();
+    const queryClient = useQueryClient();
 
     const [project, setProject] = useState<Project | null>(null);
     const [loading, setLoading] = useState(true);
@@ -29,18 +37,61 @@ export default function ProjectDetail() {
     const savedTimeRef = useRef<number>(0);
     const [sessionStartRow, setSessionStartRow] = useState<number | null>(null);
 
-    // ÉTATS UI
+    // --- ÉTATS UI ---
     const [step, setStep] = useState(1);
     const [showNotes, setShowNotes] = useState(false);
     const [showPhotos, setShowPhotos] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
     const [tempGoal, setTempGoal] = useState<string>('');
 
+    // --- UPLOAD PHOTOS (HOOK-53) ---
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const uploadPhotoMutation = useMutation({
+        mutationFn: async (file: File) => {
+            if (!project) throw new Error("Projet manquant");
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            // CORRECTION HEADER FASTIFY
+            return await api.post(`/photos?project_id=${project.id}`, formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+        },
+        onSuccess: () => {
+            // On invalide le cache pour forcer le rechargement de la liste (HOOK-54)
+            queryClient.invalidateQueries({ queryKey: ['photos'] });
+            alert("Photo ajoutée ! 📸");
+        },
+        onError: (err) => {
+            console.error("Erreur upload", err);
+            alert("Erreur lors de l'envoi.");
+        }
+    });
+
+    const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (file) {
+            uploadPhotoMutation.mutate(file);
+        }
+    };
+
+    // --- RÉCUPÉRATION DES PHOTOS (HOOK-54) ---
+    const { data: photos = [] } = useQuery({
+        queryKey: ['photos', id], // La clé dépend de l'ID du projet
+        queryFn: async () => {
+            if (!id) return [];
+            const { data } = await api.get(`/photos?project_id=${id}`);
+            return data as Photo[];
+        },
+        enabled: showPhotos // On ne charge que si la modale est ouverte
+    });
+
     useEffect(() => {
         fetchProject();
     }, [id]);
 
-    // --- MUTATION POUR SAUVEGARDER LA SESSION (HOOK-51) ---
     const saveSessionMutation = useMutation({
         mutationFn: async (sessionData: any) => {
             return await api.post('/sessions', sessionData);
@@ -48,7 +99,6 @@ export default function ProjectDetail() {
         onError: (err) => console.error("Erreur sauvegarde session", err)
     });
 
-    // --- EFFET DU TIMER ---
     useEffect(() => {
         let interval: any = null;
         if (isActive) {
@@ -63,15 +113,12 @@ export default function ProjectDetail() {
         return () => clearInterval(interval);
     }, [isActive]);
 
-    // --- HANDLERS TIMER MODIFIÉS POUR SAUVEGARDE ---
     const handleToggleTimer = () => {
         if (isActive) {
-            // --- ACTION : PAUSE ---
             const now = Date.now();
             const start = startTimeRef.current || now;
             const duration = Math.floor((now - start) / 1000);
 
-            // On ne sauvegarde que si la session a duré au moins 2 secondes (anti-missclick)
             if (duration > 2 && project) {
                 saveSessionMutation.mutate({
                     project_id: project.id,
@@ -79,16 +126,12 @@ export default function ProjectDetail() {
                     end_time: new Date(now).toISOString(),
                     duration_seconds: duration
                 });
-                console.log(`✅ Session sauvegardée : ${duration}s`);
             }
-
             savedTimeRef.current = elapsed;
             setIsActive(false);
         } else {
-            // --- ACTION : PLAY ---
             startTimeRef.current = Date.now();
             setIsActive(true);
-
             if (sessionStartRow === null && project) {
                 setSessionStartRow(project.current_row);
             }
@@ -103,7 +146,6 @@ export default function ProjectDetail() {
         setSessionStartRow(null);
     };
 
-    // --- ESTIMATION ---
     const getEstimation = () => {
         if (!project?.goal_rows || elapsed < 60 || sessionStartRow === null) return null;
         const rowsDoneInSession = project.current_row - sessionStartRow;
@@ -127,7 +169,6 @@ export default function ProjectDetail() {
             setProject(data);
             if (data.goal_rows) setTempGoal(data.goal_rows.toString());
         } catch (error) {
-            console.error("Erreur chargement projet", error);
             navigate('/');
         } finally {
             setLoading(false);
@@ -170,6 +211,8 @@ export default function ProjectDetail() {
 
     return (
         <div className="min-h-screen bg-background text-white flex flex-col px-6 py-6 animate-fade-in relative">
+
+            {/* Header */}
             <div className="flex justify-between items-center mb-6">
                 <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-zinc-400 hover:text-white transition">
                     <ArrowLeft />
@@ -180,6 +223,7 @@ export default function ProjectDetail() {
                 </button>
             </div>
 
+            {/* Titre & Timer */}
             <div className="text-center space-y-4 mb-8">
                 <h1 className="text-2xl font-bold">{project.title}</h1>
                 <Timer
@@ -196,6 +240,7 @@ export default function ProjectDetail() {
                 )}
             </div>
 
+            {/* Compteur */}
             <div className="flex-1 flex flex-col items-center justify-center -mt-6">
                 <p className="text-zinc-500 text-sm mb-4">Rang actuel</p>
                 <div className="text-[120px] font-bold leading-none tracking-tighter select-none">
@@ -212,6 +257,7 @@ export default function ProjectDetail() {
                 </div>
             </div>
 
+            {/* Contrôles */}
             <div className="flex items-center justify-center gap-8 mb-12">
                 <button onClick={() => updateCounter(-1)} className="w-20 h-20 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 shadow-lg active:scale-90 transition-transform">
                     <Minus size={32} />
@@ -221,6 +267,7 @@ export default function ProjectDetail() {
                 </button>
             </div>
 
+            {/* Footer */}
             <div className="grid grid-cols-2 gap-4">
                 <button onClick={() => setShowNotes(true)} className="flex flex-col items-center justify-center gap-2 bg-zinc-800/50 border border-zinc-700/50 p-4 rounded-2xl text-zinc-400 hover:bg-zinc-800 hover:text-white transition">
                     <StickyNote size={24} />
@@ -252,12 +299,61 @@ export default function ProjectDetail() {
                 <Button onClick={() => setShowNotes(false)} className="mt-4">Sauvegarder</Button>
             </Modal>
 
+            {/* --- MODALE PHOTOS (HOOK-53 & HOOK-54) --- */}
             <Modal isOpen={showPhotos} onClose={() => setShowPhotos(false)} title="Photos">
-                <div className="border-2 border-dashed border-zinc-700 rounded-xl h-32 flex flex-col items-center justify-center text-zinc-500 hover:border-zinc-500 hover:text-zinc-400 transition cursor-pointer bg-zinc-800/30">
-                    <Camera size={32} className="mb-2" />
-                    <span className="text-sm">Ajouter une photo</span>
+
+                {/* Zone Upload */}
+                <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileSelect}
+                    accept="image/*"
+                    className="hidden"
+                />
+
+                <div
+                    onClick={() => fileInputRef.current?.click()}
+                    className={`border-2 border-dashed border-zinc-700 rounded-xl h-24 flex flex-col items-center justify-center text-zinc-500 hover:border-zinc-500 hover:text-zinc-400 transition cursor-pointer bg-zinc-800/30 mb-6 ${uploadPhotoMutation.isPending ? 'opacity-50 pointer-events-none' : ''}`}
+                >
+                    {uploadPhotoMutation.isPending ? (
+                        <Loader2 size={24} className="animate-spin text-primary" />
+                    ) : (
+                        <div className="flex items-center gap-2">
+                            <ImagePlus size={20} />
+                            <span className="text-sm font-medium">Ajouter une photo</span>
+                        </div>
+                    )}
                 </div>
-                <p className="text-center text-zinc-600 text-sm mt-4">Aucune photo pour l'instant</p>
+
+                {/* Grille des photos (HOOK-54) */}
+                {photos.length === 0 ? (
+                    <div className="text-center text-zinc-600 py-8 text-sm">
+                        Aucune photo pour l'instant.
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-2 gap-3 max-h-[40vh] overflow-y-auto pr-1 scrollbar-hide">
+                        {photos.map((photo: Photo) => (
+                            <div key={photo.id} className="relative aspect-square rounded-lg overflow-hidden group bg-zinc-800">
+                                <img
+                                    src={`http://localhost:3000${photo.file_path}`}
+                                    alt="Projet"
+                                    className="w-full h-full object-cover transition-transform group-hover:scale-110"
+                                />
+                                {/* Overlay au survol */}
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                    <a
+                                        href={`http://localhost:3000${photo.file_path}`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="bg-white/20 p-2 rounded-full backdrop-blur-sm text-white hover:bg-white/40 transition"
+                                    >
+                                        <Eye size={16} />
+                                    </a>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </Modal>
         </div>
     );
