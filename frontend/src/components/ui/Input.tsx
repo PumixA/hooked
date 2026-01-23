@@ -1,4 +1,4 @@
-import { InputHTMLAttributes, forwardRef } from 'react';
+import { type InputHTMLAttributes, forwardRef } from 'react';
 import { twMerge } from 'tailwind-merge';
 import clsx from 'clsx';
 

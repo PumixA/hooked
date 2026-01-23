@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Save } from 'lucide-react'; // Ajout icônes
 import api from '../services/api';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
@@ -9,7 +9,6 @@ export default function MaterialCreate() {
     const navigate = useNavigate();
     const [isLoading, setIsLoading] = useState(false);
 
-    // Types de matériel (Mapping UI -> Backend)
     const types = [
         { label: 'Crochets', value: 'hook' },
         { label: 'Laine', value: 'yarn' },
@@ -17,8 +16,8 @@ export default function MaterialCreate() {
     ];
 
     const [formData, setFormData] = useState({
-        category_type: 'hook', // Valeur par défaut
-        name: '', // Taille ou Nom principal
+        category_type: 'hook',
+        name: '',
         brand: '',
         material_composition: ''
     });
@@ -30,9 +29,11 @@ export default function MaterialCreate() {
 
         try {
             await api.post('/materials', formData);
-            navigate('/inventory'); // Retour à l'inventaire après succès
+            navigate('/inventory');
         } catch (error) {
             console.error("Erreur ajout matériel", error);
+            // Protection : On avertit l'utilisateur au lieu de laisser planter
+            alert("Erreur : Impossible d'ajouter le matériel. Vérifiez votre connexion.");
         } finally {
             setIsLoading(false);
         }
@@ -43,15 +44,15 @@ export default function MaterialCreate() {
 
             {/* Header */}
             <div className="flex items-center gap-4 mb-6">
-                <button onClick={() => navigate(-1)} className="text-zinc-400 hover:text-white transition">
-                    <ArrowLeft />
+                <button onClick={() => navigate(-1)} className="text-zinc-400 hover:text-white transition p-2">
+                    <ArrowLeft size={24} />
                 </button>
                 <h1 className="text-xl font-bold">Nouveau matériel</h1>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-6">
+            <form onSubmit={handleSubmit} className="space-y-6 max-w-md mx-auto">
 
-                {/* 1. Type (Chips) */}
+                {/* 1. Type */}
                 <div className="space-y-2">
                     <label className="text-xs text-zinc-400 ml-1">Type</label>
                     <div className="flex flex-wrap gap-2">
@@ -74,8 +75,8 @@ export default function MaterialCreate() {
 
                 {/* 2. Champs */}
                 <Input
-                    label="Taille / Poids / Nom *"
-                    placeholder="ex: 4.0mm, DK, Worsted..."
+                    label={formData.category_type === 'yarn' ? "Nom / Couleur *" : "Taille (ex: 4.0mm) *"}
+                    placeholder={formData.category_type === 'yarn' ? "Ex: Merino Rouge" : "Ex: 4.0mm"}
                     value={formData.name}
                     onChange={(e) => setFormData({...formData, name: e.target.value})}
                     required
@@ -97,8 +98,14 @@ export default function MaterialCreate() {
 
                 {/* Bouton Action */}
                 <div className="pt-4">
-                    <Button type="submit" isLoading={isLoading} disabled={!formData.name}>
-                        Ajouter au stock
+                    <Button
+                        type="submit"
+                        isLoading={isLoading}
+                        disabled={!formData.name}
+                        className="w-full flex items-center justify-center gap-2"
+                    >
+                        {isLoading ? <Loader2 className="animate-spin" /> : <Save size={20} />}
+                        <span>Ajouter au stock</span>
                     </Button>
                 </div>
 
