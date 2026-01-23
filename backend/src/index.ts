@@ -6,8 +6,9 @@ import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
 import { authRoutes } from './routes/auth';
 import { usersRoutes } from './routes/users';
-import { projectsRoutes } from './routes/projects'; // <--- AJOUT
-import { materialsRoutes } from './routes/materials'; // <--- AJOUT
+import { projectsRoutes } from './routes/projects';
+import { materialsRoutes } from './routes/materials';
+import { sessionsRoutes } from './routes/sessions'; // <--- AJOUT IMPORT
 
 dotenv.config();
 
@@ -25,7 +26,7 @@ const start = async () => {
       secret: process.env.JWT_SECRET || 'secret_par_defaut_a_changer_absolument'
     });
 
-    // 3. MIDDLEWARE DE SÉCURITÉ (Le Gardien)
+    // 3. MIDDLEWARE DE SÉCURITÉ
     server.decorate("authenticate", async (request: FastifyRequest, reply: FastifyReply) => {
       try {
         await request.jwtVerify();
@@ -37,12 +38,13 @@ const start = async () => {
     // 4. Enregistrement des Routes
     await server.register(authRoutes, { prefix: '/auth' });
     await server.register(usersRoutes, { prefix: '/users' });
-
-    // NOUVELLES ROUTES (HOOK-34)
     await server.register(projectsRoutes, { prefix: '/projects' });
     await server.register(materialsRoutes, { prefix: '/materials' });
 
-    // 5. Routes API Publiques / Utilitaires
+    // NOUVELLE ROUTE (HOOK-51)
+    await server.register(sessionsRoutes, { prefix: '/sessions' });
+
+    // 5. Routes Publiques
     server.get('/', async () => {
       return { status: 'online', system: 'Hooked API 🧶' };
     });
