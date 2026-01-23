@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings, TrendingUp } from 'lucide-react';
+import { useMutation } from '@tanstack/react-query'; // <--- AJOUT
 import api from '../services/api';
 import Timer from '../components/features/Timer';
 import Modal from '../components/ui/Modal';
@@ -21,14 +22,11 @@ export default function ProjectDetail() {
     const [project, setProject] = useState<Project | null>(null);
     const [loading, setLoading] = useState(true);
 
-    // --- LOGIQUE TIMER & ESTIMATION (HOOK-50) ---
-    // On remonte l'état du Timer ici pour avoir accès à 'elapsed' pour les calculs
+    // --- LOGIQUE TIMER ---
     const [elapsed, setElapsed] = useState(0);
     const [isActive, setIsActive] = useState(false);
     const startTimeRef = useRef<number | null>(null);
     const savedTimeRef = useRef<number>(0);
-
-    // Pour calculer la vitesse : on mémorise le rang au début de la session de travail
     const [sessionStartRow, setSessionStartRow] = useState<number | null>(null);
 
     // ÉTATS UI
@@ -42,7 +40,15 @@ export default function ProjectDetail() {
         fetchProject();
     }, [id]);
 
-    // --- EFFET DU TIMER (Déplacé depuis Timer.tsx) ---
+    // --- MUTATION POUR SAUVEGARDER LA SESSION (HOOK-51) ---
+    const saveSessionMutation = useMutation({
+        mutationFn: async (sessionData: any) => {
+            return await api.post('/sessions', sessionData);
+        },
+        onError: (err) => console.error("Erreur sauvegarde session", err)
+    });
+
+    // --- EFFET DU TIMER ---
     useEffect(() => {
         let interval: any = null;
         if (isActive) {
@@ -57,19 +63,32 @@ export default function ProjectDetail() {
         return () => clearInterval(interval);
     }, [isActive]);
 
-    // Handlers du Timer
+    // --- HANDLERS TIMER MODIFIÉS POUR SAUVEGARDE ---
     const handleToggleTimer = () => {
         if (isActive) {
-            // PAUSE
+            // --- ACTION : PAUSE ---
+            const now = Date.now();
+            const start = startTimeRef.current || now;
+            const duration = Math.floor((now - start) / 1000);
+
+            // On ne sauvegarde que si la session a duré au moins 2 secondes (anti-missclick)
+            if (duration > 2 && project) {
+                saveSessionMutation.mutate({
+                    project_id: project.id,
+                    start_time: new Date(start).toISOString(),
+                    end_time: new Date(now).toISOString(),
+                    duration_seconds: duration
+                });
+                console.log(`✅ Session sauvegardée : ${duration}s`);
+            }
+
             savedTimeRef.current = elapsed;
             setIsActive(false);
         } else {
-            // PLAY
+            // --- ACTION : PLAY ---
             startTimeRef.current = Date.now();
             setIsActive(true);
 
-            // Si c'est le tout début de la session, on note à quel rang on a commencé
-            // Cela servira de point de référence pour calculer la vitesse (Rangs faits / Temps)
             if (sessionStartRow === null && project) {
                 setSessionStartRow(project.current_row);
             }
@@ -81,36 +100,24 @@ export default function ProjectDetail() {
         setElapsed(0);
         savedTimeRef.current = 0;
         startTimeRef.current = null;
-        setSessionStartRow(null); // On reset la session de calcul
+        setSessionStartRow(null);
     };
 
-    // --- CALCUL DE L'ESTIMATION ---
+    // --- ESTIMATION ---
     const getEstimation = () => {
-        // Conditions : Il faut un objectif, un début de session, et au moins 60s de travail pour être fiable
         if (!project?.goal_rows || elapsed < 60 || sessionStartRow === null) return null;
-
         const rowsDoneInSession = project.current_row - sessionStartRow;
-
-        // Si on n'a pas avancé (ou reculé), pas d'estimation possible
         if (rowsDoneInSession <= 0) return null;
 
-        // 1. Vitesse : Temps moyen par rang (en secondes)
         const secondsPerRow = elapsed / rowsDoneInSession;
-
-        // 2. Reste à faire
         const rowsRemaining = project.goal_rows - project.current_row;
         if (rowsRemaining <= 0) return "Terminé ! 🎉";
 
-        // 3. Calcul du temps total restant
         const totalSecondsRemaining = rowsRemaining * secondsPerRow;
-
-        // 4. Formatage
         const h = Math.floor(totalSecondsRemaining / 3600);
         const m = Math.floor((totalSecondsRemaining % 3600) / 60);
 
-        // Affichage conditionnel (si < 1m, on affiche "Moins d'une minute")
         if (h === 0 && m === 0) return "Moins d'une minute";
-
         return `Fin estimée dans ${h > 0 ? `${h}h ` : ''}${m}m`;
     };
 
@@ -163,8 +170,6 @@ export default function ProjectDetail() {
 
     return (
         <div className="min-h-screen bg-background text-white flex flex-col px-6 py-6 animate-fade-in relative">
-
-            {/* Header */}
             <div className="flex justify-between items-center mb-6">
                 <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-zinc-400 hover:text-white transition">
                     <ArrowLeft />
@@ -175,19 +180,14 @@ export default function ProjectDetail() {
                 </button>
             </div>
 
-            {/* Titre & Timer */}
             <div className="text-center space-y-4 mb-8">
                 <h1 className="text-2xl font-bold">{project.title}</h1>
-
-                {/* Timer contrôlé par le parent */}
                 <Timer
                     elapsed={elapsed}
                     isActive={isActive}
                     onToggle={handleToggleTimer}
                     onReset={handleResetTimer}
                 />
-
-                {/* --- AFFICHAGE DE L'ESTIMATION (HOOK-50) --- */}
                 {estimation && (
                     <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-green-400/10 text-green-400 text-xs font-medium animate-fade-in mt-2 border border-green-400/20">
                         <TrendingUp size={12} />
@@ -196,26 +196,22 @@ export default function ProjectDetail() {
                 )}
             </div>
 
-            {/* Compteur Géant */}
             <div className="flex-1 flex flex-col items-center justify-center -mt-6">
                 <p className="text-zinc-500 text-sm mb-4">Rang actuel</p>
                 <div className="text-[120px] font-bold leading-none tracking-tighter select-none">
                     {project.current_row}
                 </div>
-
                 {step > 1 && (
                     <div className="bg-primary/20 text-primary text-xs px-2 py-1 rounded-full mt-2 font-bold mb-2">
                         Pas : +/- {step}
                     </div>
                 )}
-
                 <div onClick={() => setShowSettings(true)} className="mt-2 text-zinc-500 flex items-center gap-2 cursor-pointer hover:text-zinc-300 transition p-2 rounded-lg hover:bg-zinc-800/50">
                     <span>sur {project.goal_rows || '?'} rangs</span>
                     <span className="text-[10px]">✎</span>
                 </div>
             </div>
 
-            {/* Contrôles + / - */}
             <div className="flex items-center justify-center gap-8 mb-12">
                 <button onClick={() => updateCounter(-1)} className="w-20 h-20 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 shadow-lg active:scale-90 transition-transform">
                     <Minus size={32} />
@@ -225,7 +221,6 @@ export default function ProjectDetail() {
                 </button>
             </div>
 
-            {/* Footer Buttons (Notes/Photos) */}
             <div className="grid grid-cols-2 gap-4">
                 <button onClick={() => setShowNotes(true)} className="flex flex-col items-center justify-center gap-2 bg-zinc-800/50 border border-zinc-700/50 p-4 rounded-2xl text-zinc-400 hover:bg-zinc-800 hover:text-white transition">
                     <StickyNote size={24} />
@@ -236,8 +231,6 @@ export default function ProjectDetail() {
                     <span className="text-sm">Photos</span>
                 </button>
             </div>
-
-            {/* --- MODALES --- */}
 
             <Modal isOpen={showSettings} onClose={() => setShowSettings(false)} title="Réglages du projet">
                 <div className="space-y-6">
