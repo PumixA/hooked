@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings, TrendingUp, ImagePlus, Eye } from 'lucide-react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'; // <--- AJOUT useQuery
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import Timer from '../components/features/Timer';
 import Modal from '../components/ui/Modal';
@@ -15,7 +15,6 @@ interface Project {
     goal_rows?: number;
 }
 
-// Interface pour les photos (HOOK-54)
 interface Photo {
     id: string;
     file_path: string;
@@ -44,23 +43,50 @@ export default function ProjectDetail() {
     const [showSettings, setShowSettings] = useState(false);
     const [tempGoal, setTempGoal] = useState<string>('');
 
+    // --- NOTES (HOOK-55) ---
+    const [noteContent, setNoteContent] = useState('');
+
+    // 1. Charger la note
+    useQuery({
+        queryKey: ['notes', id],
+        queryFn: async () => {
+            if (!id) return null;
+            const { data } = await api.get(`/notes?project_id=${id}`);
+            if (data.content) setNoteContent(data.content);
+            return data;
+        },
+        enabled: showNotes // On charge seulement quand on ouvre la modale
+    });
+
+    // 2. Sauvegarder la note
+    const saveNoteMutation = useMutation({
+        mutationFn: async () => {
+            if (!project) return;
+            await api.post('/notes', {
+                project_id: project.id,
+                content: noteContent
+            });
+        },
+        onSuccess: () => {
+            alert("Note sauvegardée ! 📝");
+            setShowNotes(false);
+        },
+        onError: () => alert("Erreur sauvegarde note")
+    });
+
     // --- UPLOAD PHOTOS (HOOK-53) ---
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const uploadPhotoMutation = useMutation({
         mutationFn: async (file: File) => {
             if (!project) throw new Error("Projet manquant");
-
             const formData = new FormData();
             formData.append('file', file);
-
-            // CORRECTION HEADER FASTIFY
             return await api.post(`/photos?project_id=${project.id}`, formData, {
                 headers: { 'Content-Type': 'multipart/form-data' }
             });
         },
         onSuccess: () => {
-            // On invalide le cache pour forcer le rechargement de la liste (HOOK-54)
             queryClient.invalidateQueries({ queryKey: ['photos'] });
             alert("Photo ajoutée ! 📸");
         },
@@ -79,13 +105,13 @@ export default function ProjectDetail() {
 
     // --- RÉCUPÉRATION DES PHOTOS (HOOK-54) ---
     const { data: photos = [] } = useQuery({
-        queryKey: ['photos', id], // La clé dépend de l'ID du projet
+        queryKey: ['photos', id],
         queryFn: async () => {
             if (!id) return [];
             const { data } = await api.get(`/photos?project_id=${id}`);
             return data as Photo[];
         },
-        enabled: showPhotos // On ne charge que si la modale est ouverte
+        enabled: showPhotos
     });
 
     useEffect(() => {
@@ -150,15 +176,12 @@ export default function ProjectDetail() {
         if (!project?.goal_rows || elapsed < 60 || sessionStartRow === null) return null;
         const rowsDoneInSession = project.current_row - sessionStartRow;
         if (rowsDoneInSession <= 0) return null;
-
         const secondsPerRow = elapsed / rowsDoneInSession;
         const rowsRemaining = project.goal_rows - project.current_row;
         if (rowsRemaining <= 0) return "Terminé ! 🎉";
-
         const totalSecondsRemaining = rowsRemaining * secondsPerRow;
         const h = Math.floor(totalSecondsRemaining / 3600);
         const m = Math.floor((totalSecondsRemaining % 3600) / 60);
-
         if (h === 0 && m === 0) return "Moins d'une minute";
         return `Fin estimée dans ${h > 0 ? `${h}h ` : ''}${m}m`;
     };
@@ -212,7 +235,6 @@ export default function ProjectDetail() {
     return (
         <div className="min-h-screen bg-background text-white flex flex-col px-6 py-6 animate-fade-in relative">
 
-            {/* Header */}
             <div className="flex justify-between items-center mb-6">
                 <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-zinc-400 hover:text-white transition">
                     <ArrowLeft />
@@ -223,7 +245,6 @@ export default function ProjectDetail() {
                 </button>
             </div>
 
-            {/* Titre & Timer */}
             <div className="text-center space-y-4 mb-8">
                 <h1 className="text-2xl font-bold">{project.title}</h1>
                 <Timer
@@ -240,7 +261,6 @@ export default function ProjectDetail() {
                 )}
             </div>
 
-            {/* Compteur */}
             <div className="flex-1 flex flex-col items-center justify-center -mt-6">
                 <p className="text-zinc-500 text-sm mb-4">Rang actuel</p>
                 <div className="text-[120px] font-bold leading-none tracking-tighter select-none">
@@ -257,7 +277,6 @@ export default function ProjectDetail() {
                 </div>
             </div>
 
-            {/* Contrôles */}
             <div className="flex items-center justify-center gap-8 mb-12">
                 <button onClick={() => updateCounter(-1)} className="w-20 h-20 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 shadow-lg active:scale-90 transition-transform">
                     <Minus size={32} />
@@ -267,7 +286,6 @@ export default function ProjectDetail() {
                 </button>
             </div>
 
-            {/* Footer */}
             <div className="grid grid-cols-2 gap-4">
                 <button onClick={() => setShowNotes(true)} className="flex flex-col items-center justify-center gap-2 bg-zinc-800/50 border border-zinc-700/50 p-4 rounded-2xl text-zinc-400 hover:bg-zinc-800 hover:text-white transition">
                     <StickyNote size={24} />
@@ -294,9 +312,22 @@ export default function ProjectDetail() {
                 </div>
             </Modal>
 
+            {/* --- MODALE NOTES (HOOK-55) --- */}
             <Modal isOpen={showNotes} onClose={() => setShowNotes(false)} title="Notes">
-                <textarea className="w-full h-32 bg-transparent text-white resize-none focus:outline-none placeholder-zinc-600 border-none" placeholder="Écrivez vos notes ici..." />
-                <Button onClick={() => setShowNotes(false)} className="mt-4">Sauvegarder</Button>
+                <textarea
+                    className="w-full h-48 bg-zinc-800/50 text-white p-4 rounded-xl resize-none focus:outline-none focus:ring-1 focus:ring-primary placeholder-zinc-600 border border-zinc-700"
+                    placeholder="Écrivez vos notes ici... (Patron, numéro de crochet, astuces)"
+                    value={noteContent}
+                    onChange={(e) => setNoteContent(e.target.value)}
+                />
+                <div className="mt-4 flex justify-end">
+                    <Button
+                        onClick={() => saveNoteMutation.mutate()}
+                        isLoading={saveNoteMutation.isPending}
+                    >
+                        Sauvegarder
+                    </Button>
+                </div>
             </Modal>
 
             {/* --- MODALE PHOTOS (HOOK-53 & HOOK-54) --- */}
@@ -325,7 +356,7 @@ export default function ProjectDetail() {
                     )}
                 </div>
 
-                {/* Grille des photos (HOOK-54) */}
+                {/* Grille des photos */}
                 {photos.length === 0 ? (
                     <div className="text-center text-zinc-600 py-8 text-sm">
                         Aucune photo pour l'instant.
@@ -335,14 +366,13 @@ export default function ProjectDetail() {
                         {photos.map((photo: Photo) => (
                             <div key={photo.id} className="relative aspect-square rounded-lg overflow-hidden group bg-zinc-800">
                                 <img
-                                    src={`http://localhost:3000${photo.file_path}`}
+                                    src={`http://192.168.1.96:3000${photo.file_path}`}
                                     alt="Projet"
                                     className="w-full h-full object-cover transition-transform group-hover:scale-110"
                                 />
-                                {/* Overlay au survol */}
                                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                     <a
-                                        href={`http://localhost:3000${photo.file_path}`}
+                                        href={`http://192.168.1.96:3000${photo.file_path}`}
                                         target="_blank"
                                         rel="noreferrer"
                                         className="bg-white/20 p-2 rounded-full backdrop-blur-sm text-white hover:bg-white/40 transition"

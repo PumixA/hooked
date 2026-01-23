@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { InternalAxiosRequestConfig } from 'axios';
 
-const API_URL = 'http://localhost:3000';
+const API_URL = 'http://192.168.1.96:3000';
 
 const api = axios.create({
     baseURL: API_URL,
