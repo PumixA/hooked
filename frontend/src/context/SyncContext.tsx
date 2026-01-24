@@ -6,6 +6,7 @@ import api from '../services/api';
 export type SyncActionType =
     | 'CREATE_PROJECT'
     | 'UPDATE_PROJECT'
+    | 'DELETE_PROJECT' // <--- AJOUT
     | 'CREATE_MATERIAL'
     | 'DELETE_MATERIAL'
     | 'SAVE_SESSION'
@@ -137,6 +138,11 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         // On évite d'envoyer des updates sur des IDs temporaires qui n'existent pas au back
                         if (!String(id).startsWith('temp-')) {
                             await api.patch(`/projects/${id}`, data);
+                        }
+                        break;
+                    case 'DELETE_PROJECT': // <--- GESTION DE LA SUPPRESSION
+                        if (!String(item.payload.id).startsWith('temp-')) {
+                            await api.delete(`/projects/${item.payload.id}`);
                         }
                         break;
                     case 'CREATE_MATERIAL':

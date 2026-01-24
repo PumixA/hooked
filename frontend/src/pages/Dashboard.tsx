@@ -1,11 +1,14 @@
 import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { Settings, Plus, Loader2, Clock, WifiOff, Package, Cloud, RefreshCw } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Settings, Plus, Loader2, Clock, WifiOff, Package, Cloud, RefreshCw, Trash2, Edit2 } from 'lucide-react';
 import api from '../services/api';
 import Card from '../components/ui/Card';
 import Navbar from '../components/BottomNavBar';
 import { useSync } from '../context/SyncContext';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
+import Modal from '../components/ui/Modal';
+import Input from '../components/ui/Input';
+import Button from '../components/ui/Button';
 
 interface Project {
     id: string;
@@ -18,14 +21,91 @@ interface Project {
 
 export default function Dashboard() {
     const navigate = useNavigate();
-    const { queue, isOnline, syncNow } = useSync();
+    const { queue, isOnline, syncNow, addToQueue } = useSync(); // <--- AJOUT addToQueue
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const queryClient = useQueryClient();
+
+    // --- ÉTATS POUR LE MENU CONTEXTUEL ---
+    const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+    const [isMenuOpen, setIsMenuOpen] = useState(false);
+    const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
+    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+    const [newTitle, setNewTitle] = useState('');
+
+    const longPressTimer = useRef<NodeJS.Timeout | null>(null);
 
     const { data, isLoading, isError, refetch } = useQuery({
         queryKey: ['projects'],
         queryFn: async () => {
             const response = await api.get('/projects');
             return response.data as Project[];
+        }
+    });
+
+    // --- MUTATIONS ---
+    const renameMutation = useMutation({
+        mutationFn: async ({ id, title }: { id: string, title: string }) => {
+            if (isOnline) {
+                await api.put(`/projects/${id}`, { title });
+            } else {
+                // Gestion Offline
+                addToQueue('UPDATE_PROJECT', { id, title });
+            }
+        },
+        onMutate: async ({ id, title }) => {
+            // Optimistic Update
+            await queryClient.cancelQueries({ queryKey: ['projects'] });
+            const previousProjects = queryClient.getQueryData<Project[]>(['projects']);
+
+            queryClient.setQueryData<Project[]>(['projects'], (old) => {
+                if (!old) return [];
+                return old.map(p => p.id === id ? { ...p, title, updated_at: new Date().toISOString() } : p);
+            });
+
+            return { previousProjects };
+        },
+        onError: (err, newTodo, context) => {
+            queryClient.setQueryData(['projects'], context?.previousProjects);
+        },
+        onSettled: () => {
+            if (isOnline) {
+                queryClient.invalidateQueries({ queryKey: ['projects'] });
+            }
+            setIsRenameModalOpen(false);
+            setIsMenuOpen(false);
+        }
+    });
+
+    const deleteMutation = useMutation({
+        mutationFn: async (id: string) => {
+            if (isOnline) {
+                await api.delete(`/projects/${id}`);
+            } else {
+                // Gestion Offline
+                addToQueue('DELETE_PROJECT', { id });
+            }
+        },
+        onMutate: async (id) => {
+            // Optimistic Update
+            await queryClient.cancelQueries({ queryKey: ['projects'] });
+            const previousProjects = queryClient.getQueryData<Project[]>(['projects']);
+
+            queryClient.setQueryData<Project[]>(['projects'], (old) => {
+                if (!old) return [];
+                return old.filter(p => p.id !== id);
+            });
+
+            return { previousProjects };
+        },
+        onError: (err, newTodo, context) => {
+            queryClient.setQueryData(['projects'], context?.previousProjects);
+        },
+        onSettled: () => {
+            if (isOnline) {
+                queryClient.invalidateQueries({ queryKey: ['projects'] });
+            }
+            setIsDeleteModalOpen(false);
+            setIsMenuOpen(false);
         }
     });
 
@@ -63,6 +143,33 @@ export default function Dashboard() {
         }
         setTouchStart(0);
         setPullDistance(0);
+    };
+
+    // --- GESTION DU LONG PRESS ---
+    const handlePointerDown = (project: Project) => {
+        longPressTimer.current = setTimeout(() => {
+            setSelectedProject(project);
+            setNewTitle(project.title);
+            setIsMenuOpen(true);
+        }, 600); // 600ms pour déclencher le menu
+    };
+
+    const handlePointerUp = () => {
+        if (longPressTimer.current) {
+            clearTimeout(longPressTimer.current);
+        }
+    };
+
+    const handlePointerMove = () => {
+        if (longPressTimer.current) {
+            clearTimeout(longPressTimer.current);
+        }
+    };
+
+    const handleCardClick = (projectId: string) => {
+        if (!isMenuOpen) {
+            navigate(`/projects/${projectId}`);
+        }
     };
 
 
@@ -182,8 +289,11 @@ export default function Dashboard() {
                         {/* Dernier Projet */}
                         {lastProject && (
                             <div
-                                onClick={() => navigate(`/projects/${lastProject.id}`)}
-                                className="relative overflow-hidden bg-secondary p-5 rounded-3xl border border-primary/20 shadow-lg shadow-primary/5 cursor-pointer active:scale-[0.98] transition-all"
+                                onPointerDown={() => handlePointerDown(lastProject)}
+                                onPointerUp={handlePointerUp}
+                                onPointerMove={handlePointerMove}
+                                onClick={() => handleCardClick(lastProject.id)}
+                                className="relative overflow-hidden bg-secondary p-5 rounded-3xl border border-primary/20 shadow-lg shadow-primary/5 cursor-pointer active:scale-[0.98] transition-all select-none"
                             >
                                 <img src="/logo.svg" alt="" className="absolute top-3 right-3 w-16 h-16 opacity-50 pointer-events-none" />
                                 <span className="inline-block bg-primary/20 text-primary text-[10px] px-3 py-1 rounded-full font-bold uppercase tracking-wider mb-3">
@@ -211,8 +321,11 @@ export default function Dashboard() {
                                 {otherProjects.map((proj) => (
                                     <Card
                                         key={proj.id}
-                                        onClick={() => navigate(`/projects/${proj.id}`)}
-                                        className="p-4 active:scale-[0.96] transition-transform flex flex-col justify-between h-32 bg-secondary border-zinc-800"
+                                        onPointerDown={() => handlePointerDown(proj)}
+                                        onPointerUp={handlePointerUp}
+                                        onPointerMove={handlePointerMove}
+                                        onClick={() => handleCardClick(proj.id)}
+                                        className="p-4 active:scale-[0.96] transition-transform flex flex-col justify-between h-32 bg-secondary border-zinc-800 select-none"
                                     >
                                         <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-500 mb-2 font-bold text-xs">
                                             #
@@ -239,6 +352,71 @@ export default function Dashboard() {
             </button>
 
             <Navbar />
+
+            {/* --- MODALES --- */}
+
+            {/* Menu Contextuel */}
+            <Modal isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} title={selectedProject?.title || 'Options'}>
+                <div className="space-y-3">
+                    <button
+                        onClick={() => { setIsMenuOpen(false); setIsRenameModalOpen(true); }}
+                        className="w-full flex items-center gap-3 p-4 bg-zinc-800/50 rounded-xl hover:bg-zinc-800 transition text-left"
+                    >
+                        <Edit2 size={20} className="text-blue-400" />
+                        <span className="font-medium">Renommer le projet</span>
+                    </button>
+                    <button
+                        onClick={() => { setIsMenuOpen(false); setIsDeleteModalOpen(true); }}
+                        className="w-full flex items-center gap-3 p-4 bg-red-500/10 rounded-xl hover:bg-red-500/20 transition text-left text-red-400"
+                    >
+                        <Trash2 size={20} />
+                        <span className="font-medium">Supprimer définitivement</span>
+                    </button>
+                </div>
+            </Modal>
+
+            {/* Modale Renommer */}
+            <Modal isOpen={isRenameModalOpen} onClose={() => setIsRenameModalOpen(false)} title="Renommer">
+                <div className="space-y-4">
+                    <Input
+                        value={newTitle}
+                        onChange={(e) => setNewTitle(e.target.value)}
+                        placeholder="Nouveau nom du projet"
+                    />
+                    <div className="flex gap-3 mt-4">
+                        <Button variant="secondary" onClick={() => setIsRenameModalOpen(false)} className="flex-1">Annuler</Button>
+                        <Button
+                            onClick={() => selectedProject && renameMutation.mutate({ id: selectedProject.id, title: newTitle })}
+                            isLoading={renameMutation.isPending}
+                            className="flex-1"
+                        >
+                            Valider
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* Modale Suppression */}
+            <Modal isOpen={isDeleteModalOpen} onClose={() => setIsDeleteModalOpen(false)} title="Supprimer ?">
+                <div className="space-y-4 text-center">
+                    <p className="text-zinc-400">
+                        Êtes-vous sûr de vouloir supprimer <span className="text-white font-bold">{selectedProject?.title}</span> ?
+                        <br />Cette action est irréversible.
+                    </p>
+                    <div className="flex gap-3 mt-6">
+                        <Button variant="secondary" onClick={() => setIsDeleteModalOpen(false)} className="flex-1">Annuler</Button>
+                        <Button
+                            variant="danger"
+                            onClick={() => selectedProject && deleteMutation.mutate(selectedProject.id)}
+                            isLoading={deleteMutation.isPending}
+                            className="flex-1"
+                        >
+                            Supprimer
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
+
         </div>
     );
 }

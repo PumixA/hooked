@@ -12,6 +12,7 @@ const createProjectSchema = z.object({
 
 // Validation Zod pour la mise à jour (PATCH)
 const updateProjectSchema = z.object({
+    title: z.string().optional(), // <--- AJOUT DU TITRE
     current_row: z.number().optional(),
     status: z.enum(['in_progress', 'completed', 'archived']).optional(),
     goal_rows: z.number().optional(),
@@ -63,7 +64,7 @@ export async function projectsRoutes(server: FastifyInstance) {
         }
     });
 
-    // 3. VOIR UN PROJET (GET /projects/:id) <--- C'EST CETTE ROUTE QUI MANQUAIT
+    // 3. VOIR UN PROJET (GET /projects/:id)
     server.get('/:id', async (request, reply) => {
         const { id } = request.params as { id: string };
         const userId = request.user.id;
@@ -112,6 +113,57 @@ export async function projectsRoutes(server: FastifyInstance) {
         } catch (err) {
             server.log.error(err);
             return reply.code(500).send({ error: "Erreur de mise à jour" });
+        }
+    });
+
+    // 4bis. METTRE À JOUR UN PROJET (PUT /projects/:id) - Pour compatibilité
+    server.put('/:id', async (request, reply) => {
+        const { id } = request.params as { id: string };
+        const result = updateProjectSchema.safeParse(request.body);
+
+        if (!result.success) return reply.code(400).send(result.error.issues);
+
+        const existing = await prisma.projects.findFirst({
+            where: { id, user_id: request.user.id }
+        });
+
+        if (!existing) return reply.code(404).send({ error: "Projet introuvable" });
+
+        try {
+            const updated = await prisma.projects.update({
+                where: { id },
+                data: {
+                    ...result.data,
+                    updated_at: new Date()
+                }
+            });
+            return updated;
+        } catch (err) {
+            server.log.error(err);
+            return reply.code(500).send({ error: "Erreur de mise à jour" });
+        }
+    });
+
+    // 5. SUPPRIMER UN PROJET (DELETE /projects/:id)
+    server.delete('/:id', async (request, reply) => {
+        const { id } = request.params as { id: string };
+        const userId = request.user.id;
+
+        // Vérifier que le projet appartient bien à l'utilisateur
+        const existing = await prisma.projects.findFirst({
+            where: { id, user_id: userId }
+        });
+
+        if (!existing) return reply.code(404).send({ error: "Projet introuvable" });
+
+        try {
+            await prisma.projects.delete({
+                where: { id }
+            });
+            return reply.code(204).send(); // 204 No Content
+        } catch (err) {
+            server.log.error(err);
+            return reply.code(500).send({ error: "Erreur lors de la suppression" });
         }
     });
 }
