@@ -1,9 +1,10 @@
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Settings, Plus, Loader2, Clock, WifiOff, Package } from 'lucide-react';
+import { Settings, Plus, Loader2, Clock, WifiOff, Package, Cloud, RefreshCw } from 'lucide-react'; // <--- AJOUT ICONES
 import api from '../services/api';
 import Card from '../components/ui/Card';
 import Navbar from '../components/BottomNavBar';
+import { useSync } from '../context/SyncContext'; // <--- IMPORT DU CONTEXTE
 
 interface Project {
     id: string;
@@ -16,6 +17,9 @@ interface Project {
 
 export default function Dashboard() {
     const navigate = useNavigate();
+
+    // On récupère l'état de la queue et la fonction de sync manuelle
+    const { queue, isOnline, syncNow } = useSync();
 
     // 1. Récupération Sécurisée
     const { data, isLoading, isError } = useQuery({
@@ -76,7 +80,32 @@ export default function Dashboard() {
                     <h1 className="text-2xl font-bold">Bonjour !</h1>
                 </div>
                 <div className="flex items-center gap-3">
-                    <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_#22c55e]"></div>
+
+                    {/* BOUTON DE SYNCHRO INTELLIGENT */}
+                    <button
+                        onClick={() => isOnline && queue.length > 0 ? syncNow() : null}
+                        disabled={!isOnline && queue.length === 0}
+                        className={`
+                            flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-full border transition-all
+                            ${queue.length > 0
+                            ? "bg-orange-500/10 text-orange-400 border-orange-500/50 animate-pulse cursor-pointer"
+                            : "bg-green-500/10 text-green-400 border-green-500/20"
+                        }
+                        `}
+                    >
+                        {queue.length > 0 ? (
+                            <>
+                                <RefreshCw size={12} className={isOnline ? "animate-spin" : ""} />
+                                <span>{queue.length} en attente</span>
+                            </>
+                        ) : (
+                            <>
+                                <Cloud size={12} />
+                                <span>Sync</span>
+                            </>
+                        )}
+                    </button>
+
                     <button onClick={() => navigate('/settings')} className="p-2 rounded-full bg-secondary text-gray-400 hover:text-white transition">
                         <Settings size={20} />
                     </button>

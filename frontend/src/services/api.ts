@@ -9,7 +9,9 @@ const api = axios.create({
     headers: {
         'Content-Type': 'application/json',
     },
-    timeout: 10000, // Timeout pour basculer rapidement sur le cache
+    // MODIFICATION : Timeout réduit à 3s pour le "Fail-Fast".
+    // Si le serveur ne répond pas en 3s, on considère qu'on est offline.
+    timeout: 3000,
 });
 
 // 1. Intercepteur de REQUÊTE
@@ -32,11 +34,11 @@ api.interceptors.response.use(
         return response;
     },
     (error) => {
-        // --- CAS 1 : MODE HORS-LIGNE (Erreur réseau) ---
-        // Si error.response n'existe pas, c'est que le serveur n'a pas répondu (ou timeout).
-        // On ne déconnecte PAS. On rejette l'erreur pour que l'UI puisse gérer (ex: afficher des données en cache).
-        if (!error.response) {
-            console.warn("Mode Hors-Ligne détecté 📡 - Connexion impossible.");
+        // --- CAS 1 : MODE HORS-LIGNE (Erreur réseau ou Timeout) ---
+        // Si error.code === 'ECONNABORTED', c'est un timeout.
+        // Si !error.response, c'est souvent une coupure réseau.
+        if (!error.response || error.code === 'ECONNABORTED') {
+            console.warn("Mode Hors-Ligne détecté (Timeout ou Réseau) 📡");
             return Promise.reject(error);
         }
 
@@ -44,7 +46,7 @@ api.interceptors.response.use(
         if (error.response.status === 401) {
             console.warn("Session expirée, déconnexion forcée.");
             localStorage.removeItem('token');
-            localStorage.removeItem('user'); // Nettoyage des données utilisateur
+            localStorage.removeItem('user');
 
             if (window.location.pathname !== '/login') {
                 window.location.href = '/login';

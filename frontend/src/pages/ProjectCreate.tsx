@@ -1,59 +1,131 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
-import { useMutation, useQueryClient } from '@tanstack/react-query'; // <--- IMPORTS AJOUTÉS
+import { useQueryClient } from '@tanstack/react-query';
+import { useSync } from '../context/SyncContext';
 import api from '../services/api';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 
 export default function ProjectCreate() {
     const navigate = useNavigate();
-    const queryClient = useQueryClient(); // <--- Accès au cache pour l'invalidation
+    const { isOnline, addToQueue } = useSync();
+    const queryClient = useQueryClient();
 
     // États du formulaire
     const [title, setTitle] = useState('');
     const [goalRows, setGoalRows] = useState('');
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+    const [isLoading, setIsLoading] = useState(false);
 
     // Données statiques pour l'UI
     const categories = ["Pull", "Bonnet", "Echarpe", "Couverture", "Gants", "Sac", "Amigurumi", "Autre"];
     const hookSizes = ["2.0mm", "2.5mm", "3.0mm", "3.5mm", "4.0mm", "4.5mm", "5.0mm", "5.5mm", "6.0mm"];
 
-    // Définition de la mutation (Action de création)
-    const mutation = useMutation({
-        mutationFn: async (newProject: any) => {
-            return await api.post('/projects', newProject);
-        },
-        onSuccess: () => {
-            // C'EST ICI LA MAGIE : On invalide le cache 'projects'
-            // Le Dashboard rechargera automatiquement la liste fraîche à la prochaine visite
-            queryClient.invalidateQueries({ queryKey: ['projects'] });
-
-            // Retour au Dashboard
-            navigate('/');
-        },
-        onError: (error) => {
-            console.error("Erreur création", error);
-            // Ici on pourrait ajouter un toast d'erreur
-        }
-    });
-
-    const handleSubmit = (e?: React.FormEvent) => {
-        // Empêcher le rechargement si déclenché par le formulaire
+    const handleSubmit = async (e?: React.FormEvent) => {
         if (e) e.preventDefault();
+        if (!title || isLoading) return;
 
-        if (!title) return;
+        console.log("📝 Soumission du formulaire");
 
-        // Préparation des données
         const payload = {
             title,
-            // Si goalRows est vide, on envoie undefined pour qu'il soit ignoré
             goal_rows: goalRows ? parseInt(goalRows) : undefined,
-            // On peut aussi envoyer la catégorie si tu le souhaites (ex: category_id plus tard)
         };
 
-        // Lancement de la mutation (remplace le try/catch manuel)
-        mutation.mutate(payload);
+        console.log("📦 Payload:", payload);
+        console.log("🔍 État connexion:", { isOnline, navigatorOnline: navigator.onLine });
+
+        setIsLoading(true);
+
+        try {
+            // Vérifier si on est vraiment offline
+            if (!isOnline || !navigator.onLine) {
+                console.log("📡 MODE OFFLINE - Ajout à la queue");
+
+                // Ajouter à la queue
+                addToQueue('CREATE_PROJECT', payload);
+
+                // Mise à jour optimiste du cache
+                const tempProject = {
+                    ...payload,
+                    id: `temp-${Date.now()}`,
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                    completed_rows: 0,
+                    isOffline: true
+                };
+
+                queryClient.setQueryData(['projects'], (oldData: any) => {
+                    if (Array.isArray(oldData)) {
+                        return [tempProject, ...oldData];
+                    }
+                    return [tempProject];
+                });
+
+                console.log("✅ Ajouté à la queue, navigation...");
+
+                // Attendre un tout petit peu pour être sûr
+                await new Promise(resolve => setTimeout(resolve, 100));
+
+                setIsLoading(false);
+
+                // Navigation
+                navigate('/', { replace: true });
+
+                return;
+            }
+
+            console.log("🌐 MODE ONLINE - Appel API");
+
+            // Appel API normal
+            const response = await api.post('/projects', payload);
+
+            console.log("✅ Projet créé:", response.data);
+
+            // Invalider le cache
+            await queryClient.invalidateQueries({ queryKey: ['projects'] });
+
+            setIsLoading(false);
+
+            // Navigation
+            navigate('/', { replace: true });
+
+        } catch (error: any) {
+            console.error("❌ Erreur:", error);
+
+            // Vérifier si c'est une erreur réseau
+            if (!error.response || error.code === 'ECONNABORTED' || error.message === 'Network Error') {
+                console.log("⚠️ Erreur réseau détectée - Fallback offline");
+
+                // Ajouter à la queue
+                addToQueue('CREATE_PROJECT', payload);
+
+                // Mise à jour optimiste
+                const tempProject = {
+                    ...payload,
+                    id: `temp-${Date.now()}`,
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                    completed_rows: 0,
+                    isOffline: true
+                };
+
+                queryClient.setQueryData(['projects'], (oldData: any) => {
+                    if (Array.isArray(oldData)) {
+                        return [tempProject, ...oldData];
+                    }
+                    return [tempProject];
+                });
+
+                setIsLoading(false);
+                navigate('/', { replace: true });
+            } else {
+                // Erreur métier
+                setIsLoading(false);
+                alert("Erreur lors de la création du projet");
+            }
+        }
     };
 
     return (
@@ -61,16 +133,25 @@ export default function ProjectCreate() {
 
             {/* Header avec bouton Retour */}
             <div className="flex items-center gap-4 mb-8">
-                <button onClick={() => navigate(-1)} className="text-zinc-400 hover:text-white transition">
+                <button
+                    onClick={() => navigate(-1)}
+                    className="text-zinc-400 hover:text-white transition"
+                >
                     <ArrowLeft />
                 </button>
                 <span className="text-zinc-400 text-sm">Retour</span>
             </div>
 
+            {/* Indicateur de statut de connexion */}
+            {!isOnline && (
+                <div className="mb-4 p-3 bg-yellow-900/30 border border-yellow-600/50 rounded-lg text-yellow-200 text-sm">
+                    📡 Mode hors ligne - Votre projet sera synchronisé automatiquement
+                </div>
+            )}
+
             <h1 className="text-3xl font-bold mb-2">Nouveau projet</h1>
             <p className="text-zinc-500 mb-8">Créez un nouveau projet de crochet</p>
 
-            {/* On encapsule dans <form> pour gérer la touche "Entrée" sur clavier mobile */}
             <form onSubmit={handleSubmit} className="space-y-6">
 
                 {/* 1. Nom du projet */}
@@ -79,7 +160,7 @@ export default function ProjectCreate() {
                     placeholder="Mon super projet..."
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
-                    required // HTML5 validation visuelle
+                    required
                 />
 
                 {/* 2. Catégories (Chips) */}
@@ -89,11 +170,11 @@ export default function ProjectCreate() {
                         {categories.map((cat) => (
                             <button
                                 key={cat}
-                                type="button" // Important pour ne pas submit le form
+                                type="button"
                                 onClick={() => setSelectedCategory(cat)}
                                 className={`px-4 py-2 rounded-full text-sm font-medium border transition-all ${
                                     selectedCategory === cat
-                                        ? "bg-secondary border-primary text-white shadow-[0_0_10px_-3px_rgba(196,181,253,0.5)]"
+                                        ? "bg-secondary border-primary text-white shadow-[0_0_10px_-3px_rgba(196,181,254,0.5)]"
                                         : "bg-zinc-800/50 border-zinc-700 text-zinc-400 hover:border-zinc-500"
                                 }`}
                             >
@@ -103,7 +184,7 @@ export default function ProjectCreate() {
                     </div>
                 </div>
 
-                {/* 3. Taille du crochet (Select stylisé) */}
+                {/* 3. Taille du crochet */}
                 <div className="space-y-1">
                     <label className="text-xs text-zinc-400 ml-1">Taille du crochet</label>
                     <div className="relative">
@@ -138,12 +219,26 @@ export default function ProjectCreate() {
                 <div className="pt-4">
                     <Button
                         type="submit"
-                        isLoading={mutation.isPending} // isPending remplace isLoading dans React Query v5
-                        disabled={!title}
+                        isLoading={isLoading}
+                        disabled={!title || isLoading}
                     >
-                        Commencer le projet
+                        {isLoading
+                            ? 'Création en cours...'
+                            : isOnline
+                                ? 'Commencer le projet'
+                                : 'Créer hors ligne'
+                        }
                     </Button>
                 </div>
+
+                {/* Debug info */}
+                {process.env.NODE_ENV === 'development' && (
+                    <div className="mt-4 p-2 bg-zinc-900 rounded text-xs">
+                        <div>isLoading: {isLoading ? 'true' : 'false'}</div>
+                        <div>isOnline: {isOnline ? 'true' : 'false'}</div>
+                        <div>navigator.onLine: {navigator.onLine ? 'true' : 'false'}</div>
+                    </div>
+                )}
 
             </form>
         </div>

@@ -1,12 +1,14 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings, TrendingUp, ImagePlus, Eye } from 'lucide-react';
+import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings, TrendingUp, ImagePlus, Eye, WifiOff } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import Timer from '../components/features/Timer';
 import Modal from '../components/ui/Modal';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
+import { useSafeMutation } from '../hooks/useSafeMutation'; // <--- IMPORT DU SUPER HOOK
+import { useSync } from '../context/SyncContext'; // Pour savoir si on est online (photos)
 
 interface Project {
     id: string;
@@ -22,12 +24,27 @@ interface Photo {
 }
 
 export default function ProjectDetail() {
-    const { id } = useParams();
+    const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
     const queryClient = useQueryClient();
+    const { isOnline } = useSync(); // Pour gérer l'upload photo
 
-    const [project, setProject] = useState<Project | null>(null);
-    const [loading, setLoading] = useState(true);
+    // --- 1. CHARGEMENT INTELLIGENT (CACHE FIRST) ---
+    // On cherche d'abord dans la liste globale si le projet existe (ex: temp-123)
+    const cachedProject = queryClient.getQueryData<Project[]>(['projects'])
+        ?.find((p) => p.id === id);
+
+    const { data: project, isLoading } = useQuery({
+        queryKey: ['projects', id],
+        queryFn: async () => {
+            const { data } = await api.get(`/projects/${id}`);
+            return data as Project;
+        },
+        // Si on a le projet en cache (créé offline), on l'utilise direct
+        initialData: cachedProject,
+        // Si c'est un ID temporaire, on INTERDIT l'appel réseau
+        enabled: !!id && !String(id).startsWith('temp-'),
+    });
 
     // --- LOGIQUE TIMER ---
     const [elapsed, setElapsed] = useState(0);
@@ -43,38 +60,61 @@ export default function ProjectDetail() {
     const [showSettings, setShowSettings] = useState(false);
     const [tempGoal, setTempGoal] = useState<string>('');
 
-    // --- NOTES (HOOK-55) ---
+    // Init tempGoal quand le projet charge
+    useEffect(() => {
+        if (project?.goal_rows) setTempGoal(project.goal_rows.toString());
+    }, [project]);
+
+
+    // --- 2. MUTATIONS OFFLINE-READY ---
+
+    // A. Mise à jour Projet (Compteur & Objectif)
+    const updateProjectMutation = useSafeMutation({
+        mutationFn: async (updates: any) => await api.patch(`/projects/${id}`, updates),
+        syncType: 'UPDATE_PROJECT',
+        queryKey: ['projects', id!],
+        // On met aussi à jour la liste globale pour que le dashboard soit synchro
+        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects'] })
+    });
+
+    // B. Sauvegarde Session (Timer)
+    const saveSessionMutation = useSafeMutation({
+        mutationFn: async (sessionData: any) => await api.post('/sessions', sessionData),
+        syncType: 'SAVE_SESSION',
+        queryKey: ['sessions', id!]
+    });
+
+    // C. Notes (Chargement + Sauvegarde Offline)
     const [noteContent, setNoteContent] = useState('');
 
-    // 1. Charger la note
+    // Query Notes (Seulement si vrai ID et Online, sinon faudra gérer le cache local plus tard)
     useQuery({
         queryKey: ['notes', id],
         queryFn: async () => {
-            if (!id) return null;
+            if (!id || id.startsWith('temp-')) return null;
             const { data } = await api.get(`/notes?project_id=${id}`);
-            if (data.content) setNoteContent(data.content);
+            if (data?.content) setNoteContent(data.content);
             return data;
         },
-        enabled: showNotes // On charge seulement quand on ouvre la modale
+        enabled: showNotes && isOnline && !!id && !id.startsWith('temp-')
     });
 
-    // 2. Sauvegarder la note
-    const saveNoteMutation = useMutation({
+    const saveNoteMutation = useSafeMutation({
         mutationFn: async () => {
             if (!project) return;
-            await api.post('/notes', {
-                project_id: project.id,
-                content: noteContent
-            });
+            await api.post('/notes', { project_id: project.id, content: noteContent });
         },
+        syncType: 'ADD_NOTE', // Attention, ton SyncContext doit gérer ADD_NOTE ou UPDATE_NOTE
+        queryKey: ['notes', id!],
         onSuccess: () => {
-            alert("Note sauvegardée ! 📝");
+            // alert("Note sauvegardée !"); // Optionnel, safeMutation gère déjà le fallback
             setShowNotes(false);
-        },
-        onError: () => alert("Erreur sauvegarde note")
+        }
     });
 
-    // --- UPLOAD PHOTOS (HOOK-53) ---
+    // --- 3. MUTATION ONLINE ONLY (PHOTOS) ---
+    // Les photos en Base64 dans le localStorage, c'est trop lourd.
+    // On garde l'upload classique et on désactive le bouton si Offline.
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const uploadPhotoMutation = useMutation({
@@ -90,41 +130,27 @@ export default function ProjectDetail() {
             queryClient.invalidateQueries({ queryKey: ['photos'] });
             alert("Photo ajoutée ! 📸");
         },
-        onError: (err) => {
-            console.error("Erreur upload", err);
-            alert("Erreur lors de l'envoi.");
-        }
+        onError: () => alert("Erreur lors de l'envoi.")
     });
 
     const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
-        if (file) {
-            uploadPhotoMutation.mutate(file);
-        }
+        if (file) uploadPhotoMutation.mutate(file);
     };
 
-    // --- RÉCUPÉRATION DES PHOTOS (HOOK-54) ---
     const { data: photos = [] } = useQuery({
         queryKey: ['photos', id],
         queryFn: async () => {
-            if (!id) return [];
+            if (!id || id.startsWith('temp-')) return [];
             const { data } = await api.get(`/photos?project_id=${id}`);
             return data as Photo[];
         },
-        enabled: showPhotos
+        enabled: showPhotos && !!id && !id.startsWith('temp-')
     });
 
-    useEffect(() => {
-        fetchProject();
-    }, [id]);
+    // --- LOGIQUE METIER ---
 
-    const saveSessionMutation = useMutation({
-        mutationFn: async (sessionData: any) => {
-            return await api.post('/sessions', sessionData);
-        },
-        onError: (err) => console.error("Erreur sauvegarde session", err)
-    });
-
+    // Timer Interval
     useEffect(() => {
         let interval: any = null;
         if (isActive) {
@@ -139,8 +165,10 @@ export default function ProjectDetail() {
         return () => clearInterval(interval);
     }, [isActive]);
 
+    // Actions Timer
     const handleToggleTimer = () => {
         if (isActive) {
+            // STOP
             const now = Date.now();
             const start = startTimeRef.current || now;
             const duration = Math.floor((now - start) / 1000);
@@ -156,6 +184,7 @@ export default function ProjectDetail() {
             savedTimeRef.current = elapsed;
             setIsActive(false);
         } else {
+            // START
             startTimeRef.current = Date.now();
             setIsActive(true);
             if (sessionStartRow === null && project) {
@@ -172,6 +201,7 @@ export default function ProjectDetail() {
         setSessionStartRow(null);
     };
 
+    // Estimation
     const getEstimation = () => {
         if (!project?.goal_rows || elapsed < 60 || sessionStartRow === null) return null;
         const rowsDoneInSession = project.current_row - sessionStartRow;
@@ -186,43 +216,40 @@ export default function ProjectDetail() {
         return `Fin estimée dans ${h > 0 ? `${h}h ` : ''}${m}m`;
     };
 
-    const fetchProject = async () => {
-        try {
-            const { data } = await api.get(`/projects/${id}`);
-            setProject(data);
-            if (data.goal_rows) setTempGoal(data.goal_rows.toString());
-        } catch (error) {
-            navigate('/');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const saveProjectChanges = async (updates: Partial<Project>) => {
-        if (!project) return;
-        setProject({ ...project, ...updates });
-        try {
-            await api.patch(`/projects/${project.id}`, {
-                ...updates,
-                updated_at: new Date().toISOString()
-            });
-        } catch (error) { console.error(error); }
-    };
-
+    // Compteur
     const updateCounter = (increment: number) => {
         if (!project) return;
         const amount = increment * step;
         const newCount = Math.max(0, project.current_row + amount);
-        saveProjectChanges({ current_row: newCount });
+
+        // Optimistic Update local (pour réactivité immédiate de l'UI)
+        queryClient.setQueryData(['projects', id], (old: Project) => ({
+            ...old,
+            current_row: newCount
+        }));
+
+        // Envoi via SafeMutation (API ou Queue)
+        updateProjectMutation.mutate({
+            id: project.id, // IMPORTANT: passer l'ID pour le SyncContext
+            current_row: newCount
+        });
     };
 
     const handleSaveSettings = () => {
+        if (!project) return;
         const newGoal = tempGoal ? parseInt(tempGoal) : undefined;
-        saveProjectChanges({ goal_rows: newGoal });
+
+        updateProjectMutation.mutate({
+            id: project.id,
+            goal_rows: newGoal
+        });
         setShowSettings(false);
     };
 
-    if (loading || !project) {
+
+    // --- RENDER ---
+
+    if (isLoading && !project) {
         return (
             <div className="h-screen flex items-center justify-center bg-background text-primary">
                 <Loader2 className="animate-spin" size={40} />
@@ -230,21 +257,35 @@ export default function ProjectDetail() {
         );
     }
 
+    if (!project) {
+        return <div className="text-white p-10">Projet introuvable</div>;
+    }
+
     const estimation = getEstimation();
+    const isOfflineProject = id?.startsWith('temp-');
 
     return (
         <div className="min-h-screen bg-background text-white flex flex-col px-6 py-6 animate-fade-in relative">
 
+            {/* HEADER */}
             <div className="flex justify-between items-center mb-6">
-                <button onClick={() => navigate(-1)} className="flex items-center gap-2 text-zinc-400 hover:text-white transition">
+                <button onClick={() => navigate('/')} className="flex items-center gap-2 text-zinc-400 hover:text-white transition">
                     <ArrowLeft />
                     <span className="text-sm">Retour</span>
                 </button>
-                <button onClick={() => setShowSettings(true)} className="p-2 rounded-full bg-zinc-800 text-zinc-400 hover:text-white transition">
-                    <Settings size={20} />
-                </button>
+                <div className="flex gap-2">
+                    {isOfflineProject && (
+                        <span className="text-[10px] bg-orange-500/20 text-orange-400 px-2 py-1 rounded-full border border-orange-500/50 flex items-center gap-1">
+                            <WifiOff size={10} /> Local
+                        </span>
+                    )}
+                    <button onClick={() => setShowSettings(true)} className="p-2 rounded-full bg-zinc-800 text-zinc-400 hover:text-white transition">
+                        <Settings size={20} />
+                    </button>
+                </div>
             </div>
 
+            {/* INFO & TIMER */}
             <div className="text-center space-y-4 mb-8">
                 <h1 className="text-2xl font-bold">{project.title}</h1>
                 <Timer
@@ -261,6 +302,7 @@ export default function ProjectDetail() {
                 )}
             </div>
 
+            {/* COMPTEUR */}
             <div className="flex-1 flex flex-col items-center justify-center -mt-6">
                 <p className="text-zinc-500 text-sm mb-4">Rang actuel</p>
                 <div className="text-[120px] font-bold leading-none tracking-tighter select-none">
@@ -277,6 +319,7 @@ export default function ProjectDetail() {
                 </div>
             </div>
 
+            {/* BOUTONS +/- */}
             <div className="flex items-center justify-center gap-8 mb-12">
                 <button onClick={() => updateCounter(-1)} className="w-20 h-20 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 shadow-lg active:scale-90 transition-transform">
                     <Minus size={32} />
@@ -286,6 +329,7 @@ export default function ProjectDetail() {
                 </button>
             </div>
 
+            {/* ACTIONS FOOTER */}
             <div className="grid grid-cols-2 gap-4">
                 <button onClick={() => setShowNotes(true)} className="flex flex-col items-center justify-center gap-2 bg-zinc-800/50 border border-zinc-700/50 p-4 rounded-2xl text-zinc-400 hover:bg-zinc-800 hover:text-white transition">
                     <StickyNote size={24} />
@@ -297,6 +341,7 @@ export default function ProjectDetail() {
                 </button>
             </div>
 
+            {/* MODALE SETTINGS */}
             <Modal isOpen={showSettings} onClose={() => setShowSettings(false)} title="Réglages du projet">
                 <div className="space-y-6">
                     <div className="space-y-2">
@@ -312,11 +357,11 @@ export default function ProjectDetail() {
                 </div>
             </Modal>
 
-            {/* --- MODALE NOTES (HOOK-55) --- */}
+            {/* MODALE NOTES */}
             <Modal isOpen={showNotes} onClose={() => setShowNotes(false)} title="Notes">
                 <textarea
                     className="w-full h-48 bg-zinc-800/50 text-white p-4 rounded-xl resize-none focus:outline-none focus:ring-1 focus:ring-primary placeholder-zinc-600 border border-zinc-700"
-                    placeholder="Écrivez vos notes ici... (Patron, numéro de crochet, astuces)"
+                    placeholder="Écrivez vos notes ici..."
                     value={noteContent}
                     onChange={(e) => setNoteContent(e.target.value)}
                 />
@@ -330,60 +375,33 @@ export default function ProjectDetail() {
                 </div>
             </Modal>
 
-            {/* --- MODALE PHOTOS (HOOK-53 & HOOK-54) --- */}
+            {/* MODALE PHOTOS */}
             <Modal isOpen={showPhotos} onClose={() => setShowPhotos(false)} title="Photos">
-
-                {/* Zone Upload */}
-                <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleFileSelect}
-                    accept="image/*"
-                    className="hidden"
-                />
+                <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept="image/*" className="hidden" />
 
                 <div
-                    onClick={() => fileInputRef.current?.click()}
-                    className={`border-2 border-dashed border-zinc-700 rounded-xl h-24 flex flex-col items-center justify-center text-zinc-500 hover:border-zinc-500 hover:text-zinc-400 transition cursor-pointer bg-zinc-800/30 mb-6 ${uploadPhotoMutation.isPending ? 'opacity-50 pointer-events-none' : ''}`}
+                    onClick={() => isOnline && !isOfflineProject ? fileInputRef.current?.click() : alert("Les photos nécessitent une connexion pour l'instant.")}
+                    className={`border-2 border-dashed border-zinc-700 rounded-xl h-24 flex flex-col items-center justify-center text-zinc-500 hover:border-zinc-500 hover:text-zinc-400 transition cursor-pointer bg-zinc-800/30 mb-6 ${(!isOnline || isOfflineProject) ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
                     {uploadPhotoMutation.isPending ? (
                         <Loader2 size={24} className="animate-spin text-primary" />
                     ) : (
                         <div className="flex items-center gap-2">
-                            <ImagePlus size={20} />
-                            <span className="text-sm font-medium">Ajouter une photo</span>
+                            {(!isOnline || isOfflineProject) ? <WifiOff size={20} /> : <ImagePlus size={20} />}
+                            <span className="text-sm font-medium">
+                                {(!isOnline || isOfflineProject) ? "Disponible en ligne" : "Ajouter une photo"}
+                            </span>
                         </div>
                     )}
                 </div>
 
-                {/* Grille des photos */}
-                {photos.length === 0 ? (
-                    <div className="text-center text-zinc-600 py-8 text-sm">
-                        Aucune photo pour l'instant.
-                    </div>
-                ) : (
-                    <div className="grid grid-cols-2 gap-3 max-h-[40vh] overflow-y-auto pr-1 scrollbar-hide">
-                        {photos.map((photo: Photo) => (
-                            <div key={photo.id} className="relative aspect-square rounded-lg overflow-hidden group bg-zinc-800">
-                                <img
-                                    src={`http://192.168.1.96:3000${photo.file_path}`}
-                                    alt="Projet"
-                                    className="w-full h-full object-cover transition-transform group-hover:scale-110"
-                                />
-                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                    <a
-                                        href={`http://192.168.1.96:3000${photo.file_path}`}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="bg-white/20 p-2 rounded-full backdrop-blur-sm text-white hover:bg-white/40 transition"
-                                    >
-                                        <Eye size={16} />
-                                    </a>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
+                <div className="grid grid-cols-2 gap-3 max-h-[40vh] overflow-y-auto pr-1 scrollbar-hide">
+                    {photos.map((photo: Photo) => (
+                        <div key={photo.id} className="relative aspect-square rounded-lg overflow-hidden group bg-zinc-800">
+                            <img src={`http://192.168.1.96:3000${photo.file_path}`} alt="Projet" className="w-full h-full object-cover" />
+                        </div>
+                    ))}
+                </div>
             </Modal>
         </div>
     );
