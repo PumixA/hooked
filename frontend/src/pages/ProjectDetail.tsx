@@ -1,14 +1,14 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings, TrendingUp, ImagePlus, Eye, WifiOff } from 'lucide-react';
+import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings, TrendingUp, ImagePlus, WifiOff, Trash2 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import Timer from '../components/features/Timer';
 import Modal from '../components/ui/Modal';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
-import { useSafeMutation } from '../hooks/useSafeMutation'; // <--- IMPORT DU SUPER HOOK
-import { useSync } from '../context/SyncContext'; // Pour savoir si on est online (photos)
+import { useSafeMutation } from '../hooks/useSafeMutation';
+import { useSync } from '../context/SyncContext';
 
 interface Project {
     id: string;
@@ -27,10 +27,9 @@ export default function ProjectDetail() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
     const queryClient = useQueryClient();
-    const { isOnline } = useSync(); // Pour gérer l'upload photo
+    const { isOnline, addToQueue } = useSync();
 
     // --- 1. CHARGEMENT INTELLIGENT (CACHE FIRST) ---
-    // On cherche d'abord dans la liste globale si le projet existe (ex: temp-123)
     const cachedProject = queryClient.getQueryData<Project[]>(['projects'])
         ?.find((p) => p.id === id);
 
@@ -40,9 +39,7 @@ export default function ProjectDetail() {
             const { data } = await api.get(`/projects/${id}`);
             return data as Project;
         },
-        // Si on a le projet en cache (créé offline), on l'utilise direct
         initialData: cachedProject,
-        // Si c'est un ID temporaire, on INTERDIT l'appel réseau
         enabled: !!id && !String(id).startsWith('temp-'),
     });
 
@@ -58,36 +55,62 @@ export default function ProjectDetail() {
     const [showNotes, setShowNotes] = useState(false);
     const [showPhotos, setShowPhotos] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
-    const [tempGoal, setTempGoal] = useState<string>('');
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-    // Init tempGoal quand le projet charge
+    // États pour les réglages
+    const [tempGoal, setTempGoal] = useState<string>('');
+    const [tempTitle, setTempTitle] = useState<string>('');
+    const [tempTimer, setTempTimer] = useState<string>('');
+
+    // Init des états temporaires quand le projet charge
     useEffect(() => {
-        if (project?.goal_rows) setTempGoal(project.goal_rows.toString());
+        if (project) {
+            setTempGoal(project.goal_rows ? project.goal_rows.toString() : '');
+            setTempTitle(project.title);
+        }
     }, [project]);
+
+    // Init du timer temporaire quand la modale s'ouvre
+    useEffect(() => {
+        if (showSettings) {
+            const h = Math.floor(elapsed / 3600);
+            const m = Math.floor((elapsed % 3600) / 60);
+            const s = elapsed % 60;
+            setTempTimer(`${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`);
+        }
+    }, [showSettings, elapsed]);
 
 
     // --- 2. MUTATIONS OFFLINE-READY ---
 
-    // A. Mise à jour Projet (Compteur & Objectif)
+    // A. Mise à jour Projet (Compteur, Objectif, Titre)
     const updateProjectMutation = useSafeMutation({
         mutationFn: async (updates: any) => await api.patch(`/projects/${id}`, updates),
         syncType: 'UPDATE_PROJECT',
         queryKey: ['projects', id!],
-        // On met aussi à jour la liste globale pour que le dashboard soit synchro
         onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects'] })
     });
 
-    // B. Sauvegarde Session (Timer)
+    // B. Suppression Projet
+    const deleteProjectMutation = useSafeMutation({
+        mutationFn: async () => await api.delete(`/projects/${id}`),
+        syncType: 'DELETE_PROJECT',
+        queryKey: ['projects'], // On invalide la liste
+        onSuccess: () => {
+            navigate('/');
+        }
+    });
+
+    // C. Sauvegarde Session (Timer)
     const saveSessionMutation = useSafeMutation({
         mutationFn: async (sessionData: any) => await api.post('/sessions', sessionData),
         syncType: 'SAVE_SESSION',
         queryKey: ['sessions', id!]
     });
 
-    // C. Notes (Chargement + Sauvegarde Offline)
+    // D. Notes
     const [noteContent, setNoteContent] = useState('');
 
-    // Query Notes (Seulement si vrai ID et Online, sinon faudra gérer le cache local plus tard)
     useQuery({
         queryKey: ['notes', id],
         queryFn: async () => {
@@ -104,17 +127,12 @@ export default function ProjectDetail() {
             if (!project) return;
             await api.post('/notes', { project_id: project.id, content: noteContent });
         },
-        syncType: 'ADD_NOTE', // Attention, ton SyncContext doit gérer ADD_NOTE ou UPDATE_NOTE
+        syncType: 'ADD_NOTE',
         queryKey: ['notes', id!],
-        onSuccess: () => {
-            // alert("Note sauvegardée !"); // Optionnel, safeMutation gère déjà le fallback
-            setShowNotes(false);
-        }
+        onSuccess: () => setShowNotes(false)
     });
 
     // --- 3. MUTATION ONLINE ONLY (PHOTOS) ---
-    // Les photos en Base64 dans le localStorage, c'est trop lourd.
-    // On garde l'upload classique et on désactive le bouton si Offline.
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const uploadPhotoMutation = useMutation({
@@ -222,28 +240,41 @@ export default function ProjectDetail() {
         const amount = increment * step;
         const newCount = Math.max(0, project.current_row + amount);
 
-        // Optimistic Update local (pour réactivité immédiate de l'UI)
         queryClient.setQueryData(['projects', id], (old: Project) => ({
             ...old,
             current_row: newCount
         }));
 
-        // Envoi via SafeMutation (API ou Queue)
         updateProjectMutation.mutate({
-            id: project.id, // IMPORTANT: passer l'ID pour le SyncContext
+            id: project.id,
             current_row: newCount
         });
     };
 
     const handleSaveSettings = () => {
         if (!project) return;
-        const newGoal = tempGoal ? parseInt(tempGoal) : undefined;
+        const newGoal = tempGoal ? parseInt(tempGoal) : null; // null pour supprimer l'objectif
+
+        // Mise à jour du timer manuel
+        const [h, m, s] = tempTimer.split(':').map(Number);
+        if (!isNaN(h) && !isNaN(m) && !isNaN(s)) {
+            const newElapsed = h * 3600 + m * 60 + s;
+            setElapsed(newElapsed);
+            savedTimeRef.current = newElapsed;
+            if (isActive) startTimeRef.current = Date.now(); // Reset start time pour éviter les sauts
+        }
 
         updateProjectMutation.mutate({
             id: project.id,
+            title: tempTitle,
             goal_rows: newGoal
         });
         setShowSettings(false);
+    };
+
+    const handleDeleteProject = () => {
+        if (!project) return;
+        deleteProjectMutation.mutate({ id: project.id });
     };
 
 
@@ -251,7 +282,7 @@ export default function ProjectDetail() {
 
     if (isLoading && !project) {
         return (
-            <div className="h-screen flex items-center justify-center bg-background text-primary">
+            <div className="h-[100dvh] flex items-center justify-center bg-background text-primary">
                 <Loader2 className="animate-spin" size={40} />
             </div>
         );
@@ -265,85 +296,110 @@ export default function ProjectDetail() {
     const isOfflineProject = id?.startsWith('temp-');
 
     return (
-        <div className="min-h-screen bg-background text-white flex flex-col px-6 py-6 animate-fade-in relative">
+        <div className="h-[100dvh] w-screen bg-background text-white flex flex-col animate-fade-in overflow-hidden">
 
-            {/* HEADER */}
-            <div className="flex justify-between items-center mb-6">
-                <button onClick={() => navigate('/')} className="flex items-center gap-2 text-zinc-400 hover:text-white transition">
-                    <ArrowLeft />
-                    <span className="text-sm">Retour</span>
-                </button>
-                <div className="flex gap-2">
+            {/* 1. HEADER FIXED (Sans bordure) */}
+            <div className="fixed top-0 left-0 right-0 h-14 flex items-center justify-between px-4 bg-background z-50">
+                <div className="w-12 flex justify-start">
+                    <button onClick={() => navigate('/')} className="flex items-center gap-1 text-zinc-400 hover:text-white transition p-2 -ml-2">
+                        <ArrowLeft size={20} />
+                    </button>
+                </div>
+
+                <h1 className="font-bold text-lg truncate text-center flex-1 px-2">{project.title}</h1>
+
+                <div className="w-12 flex justify-end gap-2">
                     {isOfflineProject && (
-                        <span className="text-[10px] bg-orange-500/20 text-orange-400 px-2 py-1 rounded-full border border-orange-500/50 flex items-center gap-1">
-                            <WifiOff size={10} /> Local
+                        <span className="text-[10px] bg-orange-500/20 text-orange-400 px-1 py-1 rounded-full border border-orange-500/50 flex items-center">
+                            <WifiOff size={10} />
                         </span>
                     )}
                     <button onClick={() => setShowSettings(true)} className="p-2 rounded-full bg-zinc-800 text-zinc-400 hover:text-white transition">
-                        <Settings size={20} />
+                        <Settings size={18} />
                     </button>
                 </div>
             </div>
 
-            {/* INFO & TIMER */}
-            <div className="text-center space-y-4 mb-8">
-                <h1 className="text-2xl font-bold">{project.title}</h1>
-                <Timer
-                    elapsed={elapsed}
-                    isActive={isActive}
-                    onToggle={handleToggleTimer}
-                    onReset={handleResetTimer}
-                />
-                {estimation && (
-                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-green-400/10 text-green-400 text-xs font-medium animate-fade-in mt-2 border border-green-400/20">
-                        <TrendingUp size={12} />
-                        <span>{estimation}</span>
+            {/* 2. CONTENU PRINCIPAL (entre header et menu natif) */}
+            <div className="fixed top-14 left-0 right-0 bottom-[60px] flex flex-col overflow-hidden">
+
+                {/* TIMER */}
+                <div className="shrink-0 flex flex-col items-center justify-center py-2 bg-background">
+                    <div className="scale-75">
+                        <Timer
+                            elapsed={elapsed}
+                            isActive={isActive}
+                            onToggle={handleToggleTimer}
+                            onReset={handleResetTimer}
+                        />
                     </div>
-                )}
-            </div>
-
-            {/* COMPTEUR */}
-            <div className="flex-1 flex flex-col items-center justify-center -mt-6">
-                <p className="text-zinc-500 text-sm mb-4">Rang actuel</p>
-                <div className="text-[120px] font-bold leading-none tracking-tighter select-none">
-                    {project.current_row}
+                    {estimation && (
+                        <div className="inline-flex items-center gap-2 px-2 py-0.5 rounded-full bg-green-400/10 text-green-400 text-[10px] font-medium animate-fade-in border border-green-400/20 -mt-1">
+                            <TrendingUp size={10} />
+                            <span>{estimation}</span>
+                        </div>
+                    )}
                 </div>
-                {step > 1 && (
-                    <div className="bg-primary/20 text-primary text-xs px-2 py-1 rounded-full mt-2 font-bold mb-2">
-                        Pas : +/- {step}
+
+                {/* COMPTEUR (Prend l'espace restant) */}
+                <div className="flex-1 flex flex-col items-center justify-center min-h-0 relative">
+                    <div className="text-[20vh] font-bold leading-none tracking-tighter select-none flex items-center justify-center">
+                        {project.current_row}
                     </div>
-                )}
-                <div onClick={() => setShowSettings(true)} className="mt-2 text-zinc-500 flex items-center gap-2 cursor-pointer hover:text-zinc-300 transition p-2 rounded-lg hover:bg-zinc-800/50">
-                    <span>sur {project.goal_rows || '?'} rangs</span>
-                    <span className="text-[10px]">✎</span>
+
+                    {/* Objectif + Pas */}
+                    <div className="flex flex-col items-center gap-1 mt-1">
+                        {step > 1 && (
+                            <div className="bg-primary/20 text-primary text-[10px] px-2 py-0.5 rounded-full font-bold">
+                                Pas : +/- {step}
+                            </div>
+                        )}
+
+                        {project.goal_rows ? (
+                            <div onClick={() => setShowSettings(true)} className="text-zinc-500 flex items-center gap-2 cursor-pointer hover:text-zinc-300 transition px-2 py-1 rounded-lg hover:bg-zinc-800/50 text-xs">
+                                <span>sur {project.goal_rows} rangs</span>
+                                <span className="text-[10px]">✎</span>
+                            </div>
+                        ) : (
+                            <div className="h-5"></div>
+                        )}
+                    </div>
                 </div>
-            </div>
 
-            {/* BOUTONS +/- */}
-            <div className="flex items-center justify-center gap-8 mb-12">
-                <button onClick={() => updateCounter(-1)} className="w-20 h-20 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 shadow-lg active:scale-90 transition-transform">
-                    <Minus size={32} />
-                </button>
-                <button onClick={() => updateCounter(1)} className="w-32 h-32 rounded-full bg-primary text-background flex items-center justify-center shadow-[0_0_30px_-5px_rgba(196,181,253,0.4)] active:scale-95 transition-transform hover:shadow-[0_0_40px_-5px_rgba(196,181,253,0.6)]">
-                    <Plus size={64} />
-                </button>
-            </div>
+                {/* CONTRÔLES +/- */}
+                <div className="shrink-0 flex items-center justify-center gap-8 py-3 bg-background">
+                    <button onClick={() => updateCounter(-1)} className="w-14 h-14 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 shadow-lg active:scale-90 transition-transform">
+                        <Minus size={22} />
+                    </button>
+                    <button onClick={() => updateCounter(1)} className="w-20 h-20 rounded-full bg-primary text-background flex items-center justify-center shadow-[0_0_30px_-5px_rgba(196,181,253,0.4)] active:scale-95 transition-transform hover:shadow-[0_0_40px_-5px_rgba(196,181,253,0.6)]">
+                        <Plus size={40} />
+                    </button>
+                </div>
 
-            {/* ACTIONS FOOTER */}
-            <div className="grid grid-cols-2 gap-4">
-                <button onClick={() => setShowNotes(true)} className="flex flex-col items-center justify-center gap-2 bg-zinc-800/50 border border-zinc-700/50 p-4 rounded-2xl text-zinc-400 hover:bg-zinc-800 hover:text-white transition">
-                    <StickyNote size={24} />
-                    <span className="text-sm">Notes</span>
-                </button>
-                <button onClick={() => setShowPhotos(true)} className="flex flex-col items-center justify-center gap-2 bg-zinc-800/50 border border-zinc-700/50 p-4 rounded-2xl text-zinc-400 hover:bg-zinc-800 hover:text-white transition">
-                    <Camera size={24} />
-                    <span className="text-sm">Photos</span>
-                </button>
+                {/* BOUTONS NOTES & PHOTOS */}
+                <div className="shrink-0 bg-background border-t border-zinc-800/30 px-6 py-2">
+                    <div className="grid grid-cols-2 gap-3">
+                        <button onClick={() => setShowNotes(true)} className="flex flex-col items-center justify-center gap-0.5 bg-zinc-800/50 border border-zinc-700/50 rounded-xl text-zinc-400 hover:bg-zinc-800 hover:text-white transition h-12">
+                            <StickyNote size={16} />
+                            <span className="text-[9px]">Notes</span>
+                        </button>
+                        <button onClick={() => setShowPhotos(true)} className="flex flex-col items-center justify-center gap-0.5 bg-zinc-800/50 border border-zinc-700/50 rounded-xl text-zinc-400 hover:bg-zinc-800 hover:text-white transition h-12">
+                            <Camera size={16} />
+                            <span className="text-[9px]">Photos</span>
+                        </button>
+                    </div>
+                </div>
             </div>
 
             {/* MODALE SETTINGS */}
             <Modal isOpen={showSettings} onClose={() => setShowSettings(false)} title="Réglages du projet">
                 <div className="space-y-6">
+                    <Input
+                        label="Nom du projet"
+                        value={tempTitle}
+                        onChange={(e) => setTempTitle(e.target.value)}
+                    />
+
                     <div className="space-y-2">
                         <label className="text-xs text-zinc-400 ml-1">Pas d'incrémentation</label>
                         <div className="flex gap-2">
@@ -352,8 +408,46 @@ export default function ProjectDetail() {
                             ))}
                         </div>
                     </div>
-                    <Input label="Objectif de rangs" type="number" value={tempGoal} onChange={(e) => setTempGoal(e.target.value)} placeholder="Infini" />
-                    <Button onClick={handleSaveSettings}>Enregistrer</Button>
+
+                    <Input
+                        label="Objectif de rangs"
+                        type="number"
+                        value={tempGoal}
+                        onChange={(e) => setTempGoal(e.target.value)}
+                        placeholder="Infini"
+                    />
+
+                    <Input
+                        label="Temps écoulé (HH:MM:SS)"
+                        value={tempTimer}
+                        onChange={(e) => setTempTimer(e.target.value)}
+                        placeholder="00:00:00"
+                    />
+
+                    <div className="pt-4 space-y-3">
+                        <Button onClick={handleSaveSettings}>Enregistrer</Button>
+
+                        <button
+                            onClick={() => { setShowSettings(false); setShowDeleteConfirm(true); }}
+                            className="w-full py-3 text-red-400 hover:bg-red-500/10 rounded-xl transition flex items-center justify-center gap-2"
+                        >
+                            <Trash2 size={18} /> Supprimer le projet
+                        </button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* MODALE SUPPRESSION */}
+            <Modal isOpen={showDeleteConfirm} onClose={() => setShowDeleteConfirm(false)} title="Supprimer ?">
+                <div className="space-y-4 text-center">
+                    <p className="text-zinc-400">
+                        Voulez-vous vraiment supprimer ce projet ?<br/>
+                        Cette action est irréversible.
+                    </p>
+                    <div className="flex gap-3 mt-6">
+                        <Button variant="secondary" onClick={() => setShowDeleteConfirm(false)} className="flex-1">Annuler</Button>
+                        <Button variant="danger" onClick={handleDeleteProject} className="flex-1">Supprimer</Button>
+                    </div>
                 </div>
             </Modal>
 
