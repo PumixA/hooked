@@ -59,15 +59,20 @@ export default function ProjectCreate() {
         setIsLoading(true);
 
         try {
+            let projectId = '';
+
             // Vérifier si on est vraiment offline
             if (!isOnline || !navigator.onLine) {
                 // Ajouter à la queue
                 addToQueue('CREATE_PROJECT', payload);
 
+                // ID temporaire pour la navigation
+                projectId = `temp-${Date.now()}`;
+
                 // Mise à jour optimiste du cache
                 const tempProject = {
                     ...payload,
-                    id: `temp-${Date.now()}`,
+                    id: projectId,
                     created_at: new Date().toISOString(),
                     updated_at: new Date().toISOString(),
                     completed_rows: 0,
@@ -83,19 +88,18 @@ export default function ProjectCreate() {
 
                 // Attendre un tout petit peu pour être sûr
                 await new Promise(resolve => setTimeout(resolve, 100));
-                setIsLoading(false);
-                navigate('/', { replace: true });
-                return;
+            } else {
+                // Appel API normal
+                const response = await api.post('/projects', payload);
+                projectId = response.data.id;
+
+                // Invalider le cache
+                await queryClient.invalidateQueries({ queryKey: ['projects'] });
             }
 
-            // Appel API normal
-            await api.post('/projects', payload);
-
-            // Invalider le cache
-            await queryClient.invalidateQueries({ queryKey: ['projects'] });
-
             setIsLoading(false);
-            navigate('/', { replace: true });
+            // Navigation vers le projet créé
+            navigate(`/projects/${projectId}`, { replace: true });
 
         } catch (error: any) {
             console.error("❌ Erreur:", error);
@@ -103,9 +107,26 @@ export default function ProjectCreate() {
             // Vérifier si c'est une erreur réseau
             if (!error.response || error.code === 'ECONNABORTED' || error.message === 'Network Error') {
                 addToQueue('CREATE_PROJECT', payload);
-                // ... logique optimiste identique ...
+                
+                const projectId = `temp-${Date.now()}`;
+                const tempProject = {
+                    ...payload,
+                    id: projectId,
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                    completed_rows: 0,
+                    isOffline: true
+                };
+
+                queryClient.setQueryData(['projects'], (oldData: any) => {
+                    if (Array.isArray(oldData)) {
+                        return [tempProject, ...oldData];
+                    }
+                    return [tempProject];
+                });
+
                 setIsLoading(false);
-                navigate('/', { replace: true });
+                navigate(`/projects/${projectId}`, { replace: true });
             } else {
                 setIsLoading(false);
                 alert("Erreur lors de la création du projet");
