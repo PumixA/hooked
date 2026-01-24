@@ -35,8 +35,7 @@ export default function Login() {
 
                 {/* Header */}
                 <div className="flex flex-col items-center mb-10">
-                    <img src="/logo-mini.svg" alt="Hooked" className="w-24 h-24 mb-6" />
-                    <h1 className="text-gray-400 text-lg font-medium">Suivi de projets crochet</h1>
+                    <img src="/logo.svg" alt="Hooked" className="w-24 h-24 mb-6" />
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-4">
