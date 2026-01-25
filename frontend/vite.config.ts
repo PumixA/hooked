@@ -64,7 +64,7 @@ export default defineConfig({
               // ✅ Gestion des erreurs CORS
               fetchOptions: {
                 mode: 'cors',
-                credentials: 'include'
+                // credentials: 'include' // Supprimé car inutile pour l'auth JWT et cause des soucis CORS
               },
               matchOptions: {
                 ignoreVary: true

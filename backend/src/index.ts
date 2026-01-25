@@ -26,7 +26,8 @@ const start = async () => {
   try {
     // 1. Plugins Globaux - CORS doit être configuré pour autoriser les méthodes PUT et DELETE
     await server.register(cors, {
-      origin: '*',
+      origin: true, // ✅ MODIFICATION : Autorise l'origine de la requête (nécessaire pour credentials)
+      credentials: true, // ✅ MODIFICATION : Autorise les credentials (cookies, headers auth)
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], // <--- AJOUT EXPLICITE DES MÉTHODES
       allowedHeaders: ['Content-Type', 'Authorization'] // <--- AJOUT EXPLICITE DES HEADERS
     });
