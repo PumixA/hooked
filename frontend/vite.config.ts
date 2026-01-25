@@ -79,13 +79,10 @@ export default defineConfig({
               },
               matchOptions: {
                 ignoreVary: true
-              },
-              // 🔥 CRUCIAL : Si le réseau échoue ET que le cache est vide,
-              // on force le SW à retourner une erreur réseau standard au lieu de planter.
-              // Cela permet à Axios de catcher l'erreur.
-              handlerDidError: async () => {
-                return Response.error();
               }
+              // ❌ SUPPRESSION DE handlerDidError : Cette option n'est pas supportée par workbox-build lors de la génération
+              // et cause l'erreur "Cannot read properties of undefined".
+              // Workbox gère déjà le fallback réseau -> cache par défaut.
             }
           }
         ],

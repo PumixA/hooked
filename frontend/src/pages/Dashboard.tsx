@@ -5,7 +5,7 @@ import api from '../services/api';
 import Card from '../components/ui/Card';
 import Navbar from '../components/BottomNavBar';
 import { useSync } from '../context/SyncContext';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react'; // Ajout de useEffect
 import Modal from '../components/ui/Modal';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
@@ -21,7 +21,7 @@ interface Project {
 
 export default function Dashboard() {
     const navigate = useNavigate();
-    const { queue, isOnline, syncNow, addToQueue } = useSync();
+    const { queue, isOnline, syncNow } = useSync(); // Retiré addToQueue non utilisé ici
     const [isRefreshing, setIsRefreshing] = useState(false);
     const queryClient = useQueryClient();
 
@@ -34,31 +34,45 @@ export default function Dashboard() {
 
     const longPressTimer = useRef<NodeJS.Timeout | null>(null);
 
-    const { data, isLoading, isError, refetch } = useQuery({
+    // 1. Requête PROJETS
+    const { data, isLoading: isProjectsLoading, isError, refetch } = useQuery({
         queryKey: ['projects'],
         queryFn: async () => {
             const response = await api.get('/projects');
             return response.data as Project[];
         },
-        // 🔥 IMPORTANT : Si le SW échoue, on ne veut pas que React Query réessaie en boucle
-        // On veut afficher l'erreur (ou le cache s'il existe) immédiatement.
         retry: false,
-        // On garde les données en cache "fraîches" plus longtemps en cas de pépin
-        staleTime: 1000 * 60 * 5, // 5 minutes
+        staleTime: 1000 * 60 * 5,
     });
 
-    // --- RÉCUPÉRATION DU TEMPS HEBDOMADAIRE ---
-    const { data: weeklyTimeData } = useQuery({
+    // 2. Requête TEMPS HEBDOMADAIRE (CORRIGÉE)
+    const { data: weeklyTimeData, isLoading: isWeeklyLoading, refetch: refetchWeekly } = useQuery({
         queryKey: ['weeklyTime'],
         queryFn: async () => {
             const response = await api.get('/sessions/weekly');
+            // console.log("API Response /sessions/weekly:", response.data);
             return response.data as { totalSeconds: number };
         },
-        retry: false
+        retry: false,
+        // 👇 CRUCIAL : Force le rechargement dès qu'on revient sur le Dashboard
+        refetchOnMount: 'always',
+        staleTime: 0,
     });
 
+    // Écouteur de focus pour être sûr de mettre à jour si l'app sort de veille
+    useEffect(() => {
+        const onFocus = () => { refetchWeekly(); refetch(); };
+        window.addEventListener('focus', onFocus);
+        return () => window.removeEventListener('focus', onFocus);
+    }, [refetchWeekly, refetch]);
+
+    // 👇 FORMATAGE AMÉLIORÉ (Gère les petites durées)
     const formatWeeklyTime = (seconds: number) => {
         if (!seconds) return "0h 00m";
+
+        // Si moins d'une minute, on affiche un indicateur plutôt que 0h00
+        if (seconds < 60) return "< 1m";
+
         const hours = Math.floor(seconds / 3600);
         const minutes = Math.floor((seconds % 3600) / 60);
         return `${hours}h ${minutes.toString().padStart(2, '0')}m`;
@@ -67,30 +81,10 @@ export default function Dashboard() {
     // --- MUTATIONS ---
     const renameMutation = useMutation({
         mutationFn: async ({ id, title }: { id: string, title: string }) => {
-            if (isOnline) {
-                await api.put(`/projects/${id}`, { title });
-            } else {
-                addToQueue('UPDATE_PROJECT', { id, title });
-            }
+            await api.patch(`/projects/${id}`, { title }); // Changé put en patch par sécurité
         },
-        onMutate: async ({ id, title }) => {
-            await queryClient.cancelQueries({ queryKey: ['projects'] });
-            const previousProjects = queryClient.getQueryData<Project[]>(['projects']);
-
-            queryClient.setQueryData<Project[]>(['projects'], (old) => {
-                if (!old) return [];
-                return old.map(p => p.id === id ? { ...p, title, updated_at: new Date().toISOString() } : p);
-            });
-
-            return { previousProjects };
-        },
-        onError: (err, newTodo, context) => {
-            queryClient.setQueryData(['projects'], context?.previousProjects);
-        },
-        onSettled: () => {
-            if (isOnline) {
-                queryClient.invalidateQueries({ queryKey: ['projects'] });
-            }
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['projects'] });
             setIsRenameModalOpen(false);
             setIsMenuOpen(false);
         }
@@ -98,30 +92,10 @@ export default function Dashboard() {
 
     const deleteMutation = useMutation({
         mutationFn: async (id: string) => {
-            if (isOnline) {
-                await api.delete(`/projects/${id}`);
-            } else {
-                addToQueue('DELETE_PROJECT', { id });
-            }
+            await api.delete(`/projects/${id}`);
         },
-        onMutate: async (id) => {
-            await queryClient.cancelQueries({ queryKey: ['projects'] });
-            const previousProjects = queryClient.getQueryData<Project[]>(['projects']);
-
-            queryClient.setQueryData<Project[]>(['projects'], (old) => {
-                if (!old) return [];
-                return old.filter(p => p.id !== id);
-            });
-
-            return { previousProjects };
-        },
-        onError: (err, newTodo, context) => {
-            queryClient.setQueryData(['projects'], context?.previousProjects);
-        },
-        onSettled: () => {
-            if (isOnline) {
-                queryClient.invalidateQueries({ queryKey: ['projects'] });
-            }
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['projects'] });
             setIsDeleteModalOpen(false);
             setIsMenuOpen(false);
         }
@@ -133,7 +107,7 @@ export default function Dashboard() {
         setIsRefreshing(true);
         await Promise.all([
             refetch(),
-            queryClient.invalidateQueries({ queryKey: ['weeklyTime'] })
+            refetchWeekly() // On force aussi le refresh du temps
         ]);
         setIsRefreshing(false);
     };
@@ -193,14 +167,15 @@ export default function Dashboard() {
         }
     };
 
+    // --- TRI DES PROJETS ---
+    const sortedProjects = [...projects].sort((a, b) =>
+        new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
+    );
 
-    if (isLoading) {
-        return (
-            <div className="flex justify-center items-center h-screen bg-background text-primary">
-                <Loader2 className="animate-spin" size={40} />
-            </div>
-        );
-    }
+    const lastProject = sortedProjects[0];
+    const otherProjects = sortedProjects.slice(1);
+
+    // --- RENDU ---
 
     if (isError && projects.length === 0) {
         return (
@@ -217,13 +192,6 @@ export default function Dashboard() {
             </div>
         );
     }
-
-    const sortedProjects = [...projects].sort((a, b) =>
-        new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
-    );
-
-    const lastProject = sortedProjects[0];
-    const otherProjects = sortedProjects.slice(1);
 
     return (
         <div className="flex flex-col h-screen bg-background text-white animate-fade-in">
@@ -275,8 +243,15 @@ export default function Dashboard() {
                     </div>
                     <div>
                         <p className="text-zinc-400 text-xs uppercase tracking-wide">Temps cette semaine</p>
-                        <p className="text-2xl font-bold">
-                            {weeklyTimeData ? formatWeeklyTime(weeklyTimeData.totalSeconds) : '0h 00m'}
+                        <p className="text-2xl font-bold flex items-center gap-2">
+                            {isWeeklyLoading ? (
+                                <>
+                                    <Loader2 className="animate-spin text-zinc-500" size={20} />
+                                    <span className="text-zinc-500 text-lg">...</span>
+                                </>
+                            ) : (
+                                weeklyTimeData ? formatWeeklyTime(weeklyTimeData.totalSeconds) : '0h 00m'
+                            )}
                         </p>
                     </div>
                 </Card>
@@ -297,9 +272,18 @@ export default function Dashboard() {
                     </div>
                 )}
 
-                <h2 className="text-lg font-bold">En cours</h2>
+                <h2 className="text-lg font-bold mb-4">En cours</h2>
 
-                {projects.length === 0 ? (
+                {isProjectsLoading ? (
+                    // SKELETON LOADING POUR LES PROJETS
+                    <div className="space-y-4">
+                        <div className="h-48 bg-secondary/50 rounded-3xl animate-pulse" />
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="h-32 bg-secondary/50 rounded-xl animate-pulse" />
+                            <div className="h-32 bg-secondary/50 rounded-xl animate-pulse" />
+                        </div>
+                    </div>
+                ) : projects.length === 0 ? (
                     // Empty State
                     <div className="text-center py-12 px-4 bg-secondary/30 rounded-2xl border-2 border-dashed border-zinc-800">
                         <Package size={48} className="mx-auto mb-4 text-zinc-600" />
@@ -315,7 +299,7 @@ export default function Dashboard() {
                                 onPointerUp={handlePointerUp}
                                 onPointerMove={handlePointerMove}
                                 onClick={() => handleCardClick(lastProject.id)}
-                                className={`relative overflow-hidden bg-secondary p-5 rounded-3xl border shadow-lg shadow-primary/5 cursor-pointer active:scale-[0.98] transition-all select-none ${lastProject.status === 'completed' ? 'border-green-500/30 bg-green-500/5' : 'border-primary/20'}`}
+                                className={`relative overflow-hidden bg-secondary p-5 rounded-3xl border shadow-lg shadow-primary/5 cursor-pointer active:scale-[0.98] transition-all select-none mb-4 ${lastProject.status === 'completed' ? 'border-green-500/30 bg-green-500/5' : 'border-primary/20'}`}
                             >
                                 <img src="/logo.svg" alt="" className="absolute top-3 right-3 w-16 h-16 opacity-50 pointer-events-none" />
                                 <div className="flex items-center gap-2 mb-3">
@@ -324,7 +308,7 @@ export default function Dashboard() {
                                     </span>
                                     {lastProject.status === 'completed' && <CheckCircle size={14} className="text-green-400" />}
                                 </div>
-                                
+
                                 <h3 className="text-2xl font-bold mb-2 truncate">{lastProject.title}</h3>
                                 <div className="mt-6">
                                     <div className="flex justify-between text-xs text-zinc-400 mb-2 font-medium">
