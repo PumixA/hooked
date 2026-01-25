@@ -11,6 +11,15 @@ const createMaterialSchema = z.object({
     material_composition: z.string().optional()
 });
 
+// MODIFICATION : On autorise null pour les champs optionnels car le frontend peut envoyer null
+const updateMaterialSchema = z.object({
+    category_type: z.enum(['hook', 'yarn', 'needle']).optional(),
+    name: z.string().min(1).optional(),
+    size: z.string().nullable().optional(),
+    brand: z.string().nullable().optional(),
+    material_composition: z.string().nullable().optional()
+});
+
 export async function materialsRoutes(server: FastifyInstance) {
 
     server.addHook('onRequest', server.authenticate);
@@ -33,7 +42,31 @@ export async function materialsRoutes(server: FastifyInstance) {
         return materials;
     });
 
-    // 2. AJOUTER DU MATÉRIEL (POST /materials)
+    // 2. VOIR UN MATÉRIEL (GET /materials/:id)
+    server.get('/:id', async (request, reply) => {
+        const { id } = request.params as { id: string };
+        const userId = request.user.id;
+
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(id)) {
+             return reply.code(400).send({ error: "ID invalide" });
+        }
+
+        try {
+            const material = await prisma.materials.findFirst({
+                where: { id, user_id: userId }
+            });
+
+            if (!material) return reply.code(404).send({ error: "Matériel introuvable" });
+
+            return material;
+        } catch (err) {
+            server.log.error(err);
+            return reply.code(500).send({ error: "Erreur serveur" });
+        }
+    });
+
+    // 3. AJOUTER DU MATÉRIEL (POST /materials)
     server.post('/', async (request, reply) => {
         const result = createMaterialSchema.safeParse(request.body);
         if (!result.success) return reply.code(400).send(result.error.issues);
@@ -51,7 +84,36 @@ export async function materialsRoutes(server: FastifyInstance) {
         }
     });
 
-    // 3. SUPPRIMER DU MATÉRIEL (DELETE /materials/:id)
+    // 4. MODIFIER DU MATÉRIEL (PATCH /materials/:id)
+    server.patch('/:id', async (request, reply) => {
+        const { id } = request.params as { id: string };
+        const result = updateMaterialSchema.safeParse(request.body);
+        
+        if (!result.success) {
+            // Log pour debug
+            server.log.error({ err: result.error }, "Erreur validation Zod PATCH");
+            return reply.code(400).send(result.error.issues);
+        }
+
+        // Vérif appartenance
+        const existing = await prisma.materials.findFirst({
+            where: { id, user_id: request.user.id }
+        });
+
+        if (!existing) return reply.code(404).send({ error: "Introuvable" });
+
+        try {
+            const updated = await prisma.materials.update({
+                where: { id },
+                data: result.data
+            });
+            return updated;
+        } catch (err) {
+            return reply.code(500).send({ error: "Erreur mise à jour" });
+        }
+    });
+
+    // 5. SUPPRIMER DU MATÉRIEL (DELETE /materials/:id)
     server.delete('/:id', async (request, reply) => {
         const { id } = request.params as { id: string };
 

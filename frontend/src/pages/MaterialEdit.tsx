@@ -1,16 +1,65 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Loader2, Save } from 'lucide-react';
-import { useMutation, useQueryClient } from '@tanstack/react-query'; // Import React Query
+import { useState, useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeft, Loader2, Save, Trash2 } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import { useSync } from '../context/SyncContext';
 
-export default function MaterialCreate() {
+interface Material {
+    category_type: string;
+    name: string;
+    brand?: string;
+    material_composition?: string;
+}
+
+export default function MaterialEdit() {
+    const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
     const queryClient = useQueryClient();
     const { isOnline, addToQueue } = useSync();
+
+    const [formData, setFormData] = useState<Material | null>(null);
+
+    // 1. Récupérer les données de l'élément
+    const { data: material, isLoading: isLoadingMaterial, isError } = useQuery({
+        queryKey: ['materials', id],
+        queryFn: async () => {
+            const { data } = await api.get(`/materials/${id}`);
+            return data as Material;
+        },
+        enabled: !!id,
+    });
+
+    // Effet pour mettre à jour le formulaire quand les données arrivent
+    useEffect(() => {
+        if (material) {
+            setFormData(material);
+        }
+    }, [material]);
+
+    // 2. Mutation pour la mise à jour
+    const updateMutation = useMutation({
+        mutationFn: async (updatedMaterial: any) => {
+            if (isOnline) {
+                await api.patch(`/materials/${id}`, updatedMaterial);
+            } else {
+                addToQueue('UPDATE_MATERIAL', { id, ...updatedMaterial });
+            }
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['materials'] });
+            navigate('/inventory');
+        },
+        onError: () => alert("Erreur lors de la mise à jour.")
+    });
+
+    const handleSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!formData || !formData.name) return;
+        updateMutation.mutate(formData);
+    };
 
     const types = [
         { label: 'Crochets', value: 'hook' },
@@ -18,57 +67,38 @@ export default function MaterialCreate() {
         { label: 'Aiguilles', value: 'needle' }
     ];
 
-    const [formData, setFormData] = useState({
-        category_type: 'hook',
-        name: '',
-        brand: '',
-        material_composition: ''
-    });
+    if (isLoadingMaterial) {
+        return (
+            <div className="h-screen flex items-center justify-center text-primary bg-background">
+                <Loader2 className="animate-spin" size={40} />
+            </div>
+        );
+    }
 
-    // Utilisation de useMutation pour gérer l'ajout (et le mode hors-ligne si besoin)
-    const createMaterialMutation = useMutation({
-        mutationFn: async (newMaterial: any) => {
-            if (isOnline) {
-                await api.post('/materials', newMaterial);
-            } else {
-                // Mode hors-ligne : on ajoute à la file d'attente
-                addToQueue('CREATE_MATERIAL', newMaterial);
-                // On simule un succès pour l'UI
-                return Promise.resolve({ offline: true });
-            }
-        },
-        onSuccess: () => {
-            // Invalidation du cache pour forcer le rechargement de la liste
-            queryClient.invalidateQueries({ queryKey: ['materials'] });
-            navigate('/inventory');
-        },
-        onError: (error) => {
-            console.error("Erreur ajout matériel", error);
-            alert("Erreur : Impossible d'ajouter le matériel.");
-        }
-    });
-
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!formData.name) return;
-        
-        createMaterialMutation.mutate(formData);
-    };
+    if (isError || !formData) {
+        return (
+            <div className="h-screen flex flex-col items-center justify-center text-zinc-500 bg-background gap-4 p-4 text-center">
+                <p className="text-lg font-medium">Impossible de charger l'élément.</p>
+                <button
+                    onClick={() => navigate('/inventory')}
+                    className="mt-4 px-6 py-2 bg-zinc-800 rounded-full text-white hover:bg-zinc-700 transition"
+                >
+                    Retour à l'inventaire
+                </button>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen bg-background p-4 text-white animate-fade-in pb-20">
-
-            {/* Header */}
             <div className="flex items-center gap-4 mb-6">
                 <button onClick={() => navigate(-1)} className="text-zinc-400 hover:text-white transition p-2">
                     <ArrowLeft size={24} />
                 </button>
-                <h1 className="text-xl font-bold">Nouveau matériel</h1>
+                <h1 className="text-xl font-bold">Modifier le matériel</h1>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-6 max-w-md mx-auto">
-
-                {/* 1. Type */}
                 <div className="space-y-2">
                     <label className="text-xs text-zinc-400 ml-1">Type</label>
                     <div className="flex flex-wrap gap-2">
@@ -89,10 +119,8 @@ export default function MaterialCreate() {
                     </div>
                 </div>
 
-                {/* 2. Champs */}
                 <Input
                     label={formData.category_type === 'yarn' ? "Nom / Couleur *" : "Taille (ex: 4.0mm) *"}
-                    placeholder={formData.category_type === 'yarn' ? "Ex: Merino Rouge" : "Ex: 4.0mm"}
                     value={formData.name}
                     onChange={(e) => setFormData({...formData, name: e.target.value})}
                     required
@@ -100,31 +128,27 @@ export default function MaterialCreate() {
 
                 <Input
                     label="Marque"
-                    placeholder="ex: Clover, Drops..."
-                    value={formData.brand}
+                    value={formData.brand || ''}
                     onChange={(e) => setFormData({...formData, brand: e.target.value})}
                 />
 
                 <Input
                     label="Matière"
-                    placeholder="ex: Aluminium, Merino, Bambou..."
-                    value={formData.material_composition}
+                    value={formData.material_composition || ''}
                     onChange={(e) => setFormData({...formData, material_composition: e.target.value})}
                 />
 
-                {/* Bouton Action */}
                 <div className="pt-4">
                     <Button
                         type="submit"
-                        isLoading={createMaterialMutation.isPending}
+                        isLoading={updateMutation.isPending}
                         disabled={!formData.name}
                         className="w-full flex items-center justify-center gap-2"
                     >
-                        {createMaterialMutation.isPending ? <Loader2 className="animate-spin" /> : <Save size={20} />}
-                        <span>Ajouter au stock</span>
+                        <Save size={20} />
+                        <span>Enregistrer les modifications</span>
                     </Button>
                 </div>
-
             </form>
         </div>
     );

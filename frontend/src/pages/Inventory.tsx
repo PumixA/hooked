@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'; // Import React Query
-import { Plus, X, Loader2, PackageOpen, WifiOff } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Plus, X, Loader2, PackageOpen, WifiOff, Trash2 } from 'lucide-react';
 import api from '../services/api';
 import Card from '../components/ui/Card';
+import Modal from '../components/ui/Modal';
+import Button from '../components/ui/Button';
+import { useSync } from '../context/SyncContext';
 
 interface Material {
     id: string;
@@ -16,9 +19,13 @@ interface Material {
 export default function Inventory() {
     const navigate = useNavigate();
     const queryClient = useQueryClient();
+    const { isOnline, addToQueue } = useSync();
     const [filter, setFilter] = useState<string>('all');
+    
+    // État pour la modale de suppression
+    const [itemToDelete, setItemToDelete] = useState<Material | null>(null);
 
-    // 1. Récupération avec useQuery (Gère le Cache + Offline)
+    // 1. Récupération avec useQuery
     const { data: materials = [], isLoading, isError } = useQuery({
         queryKey: ['materials'],
         queryFn: async () => {
@@ -27,23 +34,44 @@ export default function Inventory() {
         }
     });
 
-    // 2. Mutation de suppression (Optimistic Update possible mais restons simple)
+    // 2. Mutation de suppression
     const deleteMutation = useMutation({
         mutationFn: async (id: string) => {
-            await api.delete(`/materials/${id}`);
+            if (isOnline) {
+                await api.delete(`/materials/${id}`);
+            } else {
+                addToQueue('DELETE_MATERIAL', { id });
+            }
         },
-        onSuccess: () => {
+        onMutate: async (id) => {
+            // Optimistic Update
+            await queryClient.cancelQueries({ queryKey: ['materials'] });
+            const previousMaterials = queryClient.getQueryData<Material[]>(['materials']);
+            
+            queryClient.setQueryData<Material[]>(['materials'], (old) => 
+                old ? old.filter(m => m.id !== id) : []
+            );
+            
+            return { previousMaterials };
+        },
+        onError: (err, id, context) => {
+            queryClient.setQueryData(['materials'], context?.previousMaterials);
+            alert("Erreur lors de la suppression.");
+        },
+        onSettled: () => {
             queryClient.invalidateQueries({ queryKey: ['materials'] });
-        },
-        onError: () => {
-            alert("Impossible de supprimer hors-ligne.");
+            setItemToDelete(null);
         }
     });
 
-    const handleDelete = (e: React.MouseEvent, id: string) => {
+    const handleDeleteClick = (e: React.MouseEvent, item: Material) => {
         e.stopPropagation();
-        if (confirm("Supprimer cet élément ?")) {
-            deleteMutation.mutate(id);
+        setItemToDelete(item);
+    };
+
+    const confirmDelete = () => {
+        if (itemToDelete) {
+            deleteMutation.mutate(itemToDelete.id);
         }
     };
 
@@ -88,7 +116,6 @@ export default function Inventory() {
         </div>
     );
 
-    // Protection Anti-Crash (White Screen)
     if (isError) return (
         <div className="h-screen flex flex-col items-center justify-center text-zinc-500 bg-background gap-4 p-4 text-center">
             <WifiOff size={48} />
@@ -143,7 +170,11 @@ export default function Inventory() {
                     </div>
                 ) : (
                     filteredMaterials.map((item) => (
-                        <Card key={item.id} className="flex items-center justify-between p-4 group bg-secondary border-zinc-800">
+                        <Card 
+                            key={item.id} 
+                            onClick={() => navigate(`/inventory/${item.id}`)}
+                            className="flex items-center justify-between p-4 group bg-secondary border-zinc-800 cursor-pointer active:scale-[0.98] transition-transform"
+                        >
                             <div className="flex items-center gap-4">
                                 <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl bg-zinc-800`}>
                                     {getIcon(item.category_type)}
@@ -161,10 +192,10 @@ export default function Inventory() {
                                 </div>
                             </div>
                             <button
-                                onClick={(e) => handleDelete(e, item.id)}
-                                className="text-zinc-600 hover:text-red-400 p-2 transition-colors rounded-full hover:bg-red-500/10"
+                                onClick={(e) => handleDeleteClick(e, item)}
+                                className="text-zinc-600 hover:text-red-400 p-3 -mr-2 transition-colors rounded-full hover:bg-red-500/10"
                             >
-                                <X size={20} />
+                                <Trash2 size={20} />
                             </button>
                         </Card>
                     ))
@@ -178,6 +209,27 @@ export default function Inventory() {
             >
                 <Plus size={32} strokeWidth={2.5} />
             </button>
+
+            {/* MODALE SUPPRESSION */}
+            <Modal isOpen={!!itemToDelete} onClose={() => setItemToDelete(null)} title="Supprimer ?">
+                <div className="space-y-4 text-center">
+                    <p className="text-zinc-400">
+                        Voulez-vous vraiment supprimer <span className="text-white font-bold">{itemToDelete?.name}</span> ?
+                        <br />Cette action est irréversible.
+                    </p>
+                    <div className="flex gap-3 mt-6">
+                        <Button variant="secondary" onClick={() => setItemToDelete(null)} className="flex-1">Annuler</Button>
+                        <Button
+                            variant="danger"
+                            onClick={confirmDelete}
+                            isLoading={deleteMutation.isPending}
+                            className="flex-1"
+                        >
+                            Supprimer
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
         </div>
     );
 }
