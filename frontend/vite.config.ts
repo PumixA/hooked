@@ -45,34 +45,51 @@ export default defineConfig({
         skipWaiting: true,
         clientsClaim: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        cleanupOutdatedCaches: true,
 
-        // ✅ Configuration optimisée pour éviter les erreurs CORS
         runtimeCaching: [
+          // 1. Stratégie pour les données statiques/référentiels (ex: Categories)
           {
-            urlPattern: /^http:\/\/192\.168\.1\.96:3000\/.*/,
+            urlPattern: /^http:\/\/192\.168\.1\.96:3000\/categories/,
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'api-static-data',
+              expiration: {
+                maxEntries: 50,
+                maxAgeSeconds: 60 * 60 * 24 * 7 // 7 jours
+              },
+              cacheableResponse: {
+                statuses: [0, 200]
+              }
+            }
+          },
+          // 2. Stratégie pour les données dynamiques (Projets, Sessions, User)
+          {
+            urlPattern: /^http:\/\/192\.168\.1\.96:3000\/(projects|sessions|users|materials|photos|notes).*/,
             handler: 'NetworkFirst',
             options: {
-              cacheName: 'api-cache',
-              networkTimeoutSeconds: 5,
+              cacheName: 'api-dynamic-data',
+              networkTimeoutSeconds: 3, // Timeout réseau court (3s)
               expiration: {
                 maxEntries: 100,
-                maxAgeSeconds: 60 * 60 * 24
+                maxAgeSeconds: 60 * 60 * 24 // 24h
               },
               cacheableResponse: {
                 statuses: [0, 200]
               },
-              // ✅ Gestion des erreurs CORS
-              fetchOptions: {
-                mode: 'cors',
-                // credentials: 'include' // Supprimé car inutile pour l'auth JWT et cause des soucis CORS
-              },
               matchOptions: {
                 ignoreVary: true
+              },
+              // 🔥 CRUCIAL : Si le réseau échoue ET que le cache est vide,
+              // on force le SW à retourner une erreur réseau standard au lieu de planter.
+              // Cela permet à Axios de catcher l'erreur.
+              handlerDidError: async () => {
+                return Response.error();
               }
             }
           }
         ],
-        // ✅ Important : Ne pas mettre en cache les requêtes qui échouent
+        // 🔥 IMPORTANT : Ne pas rediriger les requêtes API vers index.html en cas d'échec
         navigateFallback: null
       }
     })

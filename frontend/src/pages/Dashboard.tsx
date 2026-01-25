@@ -39,8 +39,30 @@ export default function Dashboard() {
         queryFn: async () => {
             const response = await api.get('/projects');
             return response.data as Project[];
-        }
+        },
+        // 🔥 IMPORTANT : Si le SW échoue, on ne veut pas que React Query réessaie en boucle
+        // On veut afficher l'erreur (ou le cache s'il existe) immédiatement.
+        retry: false,
+        // On garde les données en cache "fraîches" plus longtemps en cas de pépin
+        staleTime: 1000 * 60 * 5, // 5 minutes
     });
+
+    // --- RÉCUPÉRATION DU TEMPS HEBDOMADAIRE ---
+    const { data: weeklyTimeData } = useQuery({
+        queryKey: ['weeklyTime'],
+        queryFn: async () => {
+            const response = await api.get('/sessions/weekly');
+            return response.data as { totalSeconds: number };
+        },
+        retry: false
+    });
+
+    const formatWeeklyTime = (seconds: number) => {
+        if (!seconds) return "0h 00m";
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        return `${hours}h ${minutes.toString().padStart(2, '0')}m`;
+    };
 
     // --- MUTATIONS ---
     const renameMutation = useMutation({
@@ -109,7 +131,10 @@ export default function Dashboard() {
 
     const handleRefresh = async () => {
         setIsRefreshing(true);
-        await refetch();
+        await Promise.all([
+            refetch(),
+            queryClient.invalidateQueries({ queryKey: ['weeklyTime'] })
+        ]);
         setIsRefreshing(false);
     };
 
@@ -250,7 +275,9 @@ export default function Dashboard() {
                     </div>
                     <div>
                         <p className="text-zinc-400 text-xs uppercase tracking-wide">Temps cette semaine</p>
-                        <p className="text-2xl font-bold">0h 00m</p>
+                        <p className="text-2xl font-bold">
+                            {weeklyTimeData ? formatWeeklyTime(weeklyTimeData.totalSeconds) : '0h 00m'}
+                        </p>
                     </div>
                 </Card>
             </div>

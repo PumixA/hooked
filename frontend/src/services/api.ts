@@ -9,9 +9,8 @@ const api = axios.create({
     headers: {
         'Content-Type': 'application/json',
     },
-    // MODIFICATION : Timeout réduit à 3s pour le "Fail-Fast".
-    // Si le serveur ne répond pas en 3s, on considère qu'on est offline.
-    timeout: 3000,
+    // Timeout légèrement supérieur à celui du Service Worker (3s) pour éviter les race conditions
+    timeout: 5000,
 });
 
 // 1. Intercepteur de REQUÊTE
@@ -34,11 +33,13 @@ api.interceptors.response.use(
         return response;
     },
     (error) => {
-        // --- CAS 1 : MODE HORS-LIGNE (Erreur réseau ou Timeout) ---
-        // Si error.code === 'ECONNABORTED', c'est un timeout.
-        // Si !error.response, c'est souvent une coupure réseau.
-        if (!error.response || error.code === 'ECONNABORTED') {
+        // --- CAS 1 : MODE HORS-LIGNE (Erreur réseau, Timeout ou échec SW) ---
+        // Si error.code === 'ECONNABORTED' (Timeout Axios)
+        // Si error.message === 'Network Error' (Coupure nette ou SW qui rejette)
+        // Si !error.response (Pas de réponse HTTP du tout)
+        if (!error.response || error.code === 'ECONNABORTED' || error.message === 'Network Error') {
             console.warn("Mode Hors-Ligne détecté (Timeout ou Réseau) 📡");
+            // On propage l'erreur pour que React Query puisse la gérer (ex: afficher les données en cache)
             return Promise.reject(error);
         }
 
