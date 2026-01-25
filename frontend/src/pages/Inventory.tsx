@@ -31,7 +31,10 @@ export default function Inventory() {
         queryFn: async () => {
             const { data } = await api.get('/materials');
             return data as Material[];
-        }
+        },
+        // 🔥 OFFLINE-FIRST : On utilise le cache si dispo, même si stale
+        staleTime: 1000 * 60 * 5, 
+        retry: false
     });
 
     // 2. Mutation de suppression
@@ -116,7 +119,7 @@ export default function Inventory() {
         </div>
     );
 
-    if (isError) return (
+    if (isError && materials.length === 0) return (
         <div className="h-screen flex flex-col items-center justify-center text-zinc-500 bg-background gap-4 p-4 text-center">
             <WifiOff size={48} />
             <p className="text-lg font-medium">Oups, pas de connexion.</p>

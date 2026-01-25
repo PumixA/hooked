@@ -5,10 +5,11 @@ import api from '../services/api';
 import Card from '../components/ui/Card';
 import Navbar from '../components/BottomNavBar';
 import { useSync } from '../context/SyncContext';
-import { useState, useRef, useEffect } from 'react'; // Ajout de useEffect
+import { useState, useRef, useEffect } from 'react';
 import Modal from '../components/ui/Modal';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
+import { useSafeMutation } from '../hooks/useSafeMutation';
 
 interface Project {
     id: string;
@@ -21,7 +22,7 @@ interface Project {
 
 export default function Dashboard() {
     const navigate = useNavigate();
-    const { queue, isOnline, syncNow } = useSync(); // Retiré addToQueue non utilisé ici
+    const { queue, isOnline, syncNow } = useSync();
     const [isRefreshing, setIsRefreshing] = useState(false);
     const queryClient = useQueryClient();
 
@@ -31,8 +32,10 @@ export default function Dashboard() {
     const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [newTitle, setNewTitle] = useState('');
+    const [longPressTriggered, setLongPressTriggered] = useState(false);
 
     const longPressTimer = useRef<NodeJS.Timeout | null>(null);
+    const pressStartTime = useRef<number>(0);
 
     // 1. Requête PROJETS
     const { data, isLoading: isProjectsLoading, isError, refetch } = useQuery({
@@ -45,57 +48,62 @@ export default function Dashboard() {
         staleTime: 1000 * 60 * 5,
     });
 
-    // 2. Requête TEMPS HEBDOMADAIRE (CORRIGÉE)
+    // 2. Requête TEMPS HEBDOMADAIRE
     const { data: weeklyTimeData, isLoading: isWeeklyLoading, refetch: refetchWeekly } = useQuery({
         queryKey: ['weeklyTime'],
         queryFn: async () => {
             const response = await api.get('/sessions/weekly');
-            // console.log("API Response /sessions/weekly:", response.data);
             return response.data as { totalSeconds: number };
         },
         retry: false,
-        // 👇 CRUCIAL : Force le rechargement dès qu'on revient sur le Dashboard
         refetchOnMount: 'always',
         staleTime: 0,
     });
 
-    // Écouteur de focus pour être sûr de mettre à jour si l'app sort de veille
     useEffect(() => {
         const onFocus = () => { refetchWeekly(); refetch(); };
         window.addEventListener('focus', onFocus);
         return () => window.removeEventListener('focus', onFocus);
     }, [refetchWeekly, refetch]);
 
-    // 👇 FORMATAGE AMÉLIORÉ (Gère les petites durées)
     const formatWeeklyTime = (seconds: number) => {
         if (!seconds) return "0h 00m";
-
-        // Si moins d'une minute, on affiche un indicateur plutôt que 0h00
         if (seconds < 60) return "< 1m";
-
         const hours = Math.floor(seconds / 3600);
         const minutes = Math.floor((seconds % 3600) / 60);
         return `${hours}h ${minutes.toString().padStart(2, '0')}m`;
     };
 
     // --- MUTATIONS ---
-    const renameMutation = useMutation({
+    const renameMutation = useSafeMutation({
         mutationFn: async ({ id, title }: { id: string, title: string }) => {
-            await api.patch(`/projects/${id}`, { title }); // Changé put en patch par sécurité
+            await api.patch(`/projects/${id}`, { title });
         },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['projects'] });
+        syncType: 'UPDATE_PROJECT',
+        queryKey: ['projects'],
+        onSuccess: (data, variables) => {
+            if (!isOnline) {
+                queryClient.setQueryData(['projects'], (old: Project[] = []) =>
+                    old.map(p => p.id === variables.id ? { ...p, title: variables.title } : p)
+                );
+            }
             setIsRenameModalOpen(false);
             setIsMenuOpen(false);
         }
     });
 
-    const deleteMutation = useMutation({
+    const deleteMutation = useSafeMutation({
         mutationFn: async (id: string) => {
             await api.delete(`/projects/${id}`);
         },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['projects'] });
+        syncType: 'DELETE_PROJECT',
+        queryKey: ['projects'],
+        onSuccess: (data, id) => {
+            if (!isOnline) {
+                queryClient.setQueryData(['projects'], (old: Project[] = []) =>
+                    old.filter(p => p.id !== id)
+                );
+            }
             setIsDeleteModalOpen(false);
             setIsMenuOpen(false);
         }
@@ -107,7 +115,7 @@ export default function Dashboard() {
         setIsRefreshing(true);
         await Promise.all([
             refetch(),
-            refetchWeekly() // On force aussi le refresh du temps
+            refetchWeekly()
         ]);
         setIsRefreshing(false);
     };
@@ -140,31 +148,54 @@ export default function Dashboard() {
         setPullDistance(0);
     };
 
-    // --- GESTION DU LONG PRESS ---
-    const handlePointerDown = (project: Project) => {
+    // --- GESTION DU LONG PRESS AMÉLIORÉE ---
+    const handlePointerDown = (project: Project, e: React.PointerEvent) => {
+        e.stopPropagation();
+        setLongPressTriggered(false);
+        pressStartTime.current = Date.now();
+
         longPressTimer.current = setTimeout(() => {
+            setLongPressTriggered(true);
             setSelectedProject(project);
             setNewTitle(project.title);
             setIsMenuOpen(true);
-        }, 600);
+
+            // Vibration haptique si disponible
+            if (navigator.vibrate) {
+                navigator.vibrate(50);
+            }
+        }, 500); // Réduit à 500ms pour être plus réactif
     };
 
-    const handlePointerUp = () => {
+    const handlePointerUp = (e: React.PointerEvent) => {
+        e.stopPropagation();
         if (longPressTimer.current) {
             clearTimeout(longPressTimer.current);
         }
     };
 
-    const handlePointerMove = () => {
+    const handlePointerMove = (e: React.PointerEvent) => {
+        e.stopPropagation();
         if (longPressTimer.current) {
             clearTimeout(longPressTimer.current);
         }
     };
 
-    const handleCardClick = (projectId: string) => {
-        if (!isMenuOpen) {
+    const handleCardClick = (projectId: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+
+        // Vérifier si c'était un long press récent (dans les 200ms)
+        const timeSincePress = Date.now() - pressStartTime.current;
+
+        if (!longPressTriggered && timeSincePress > 200) {
             navigate(`/projects/${projectId}`);
         }
+
+        // Réinitialiser le flag
+        setTimeout(() => {
+            setLongPressTriggered(false);
+            pressStartTime.current = 0;
+        }, 100);
     };
 
     // --- TRI DES PROJETS ---
@@ -205,31 +236,6 @@ export default function Dashboard() {
                         <h1 className="text-2xl font-bold">Bonjour !</h1>
                     </div>
                     <div className="flex items-center gap-3">
-
-                        <button
-                            onClick={() => isOnline && queue.length > 0 ? syncNow() : null}
-                            disabled={!isOnline && queue.length === 0}
-                            className={`
-                                flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-full border transition-all
-                                ${queue.length > 0
-                                ? "bg-orange-500/10 text-orange-400 border-orange-500/50 animate-pulse cursor-pointer"
-                                : "bg-green-500/10 text-green-400 border-green-500/20"
-                            }
-                            `}
-                        >
-                            {queue.length > 0 ? (
-                                <>
-                                    <RefreshCw size={12} className={isOnline ? "animate-spin" : ""} />
-                                    <span>{queue.length} en attente</span>
-                                </>
-                            ) : (
-                                <>
-                                    <Cloud size={12} />
-                                    <span>Sync</span>
-                                </>
-                            )}
-                        </button>
-
                         <button onClick={() => navigate('/settings')} className="p-2 rounded-full bg-secondary text-gray-400 hover:text-white transition">
                             <Settings size={20} />
                         </button>
@@ -275,7 +281,6 @@ export default function Dashboard() {
                 <h2 className="text-lg font-bold mb-4">En cours</h2>
 
                 {isProjectsLoading ? (
-                    // SKELETON LOADING POUR LES PROJETS
                     <div className="space-y-4">
                         <div className="h-48 bg-secondary/50 rounded-3xl animate-pulse" />
                         <div className="grid grid-cols-2 gap-4">
@@ -284,7 +289,6 @@ export default function Dashboard() {
                         </div>
                     </div>
                 ) : projects.length === 0 ? (
-                    // Empty State
                     <div className="text-center py-12 px-4 bg-secondary/30 rounded-2xl border-2 border-dashed border-zinc-800">
                         <Package size={48} className="mx-auto mb-4 text-zinc-600" />
                         <p className="font-medium mb-1">Ton atelier est vide</p>
@@ -295,10 +299,10 @@ export default function Dashboard() {
                         {/* Dernier Projet */}
                         {lastProject && (
                             <div
-                                onPointerDown={() => handlePointerDown(lastProject)}
+                                onPointerDown={(e) => handlePointerDown(lastProject, e)}
                                 onPointerUp={handlePointerUp}
                                 onPointerMove={handlePointerMove}
-                                onClick={() => handleCardClick(lastProject.id)}
+                                onClick={(e) => handleCardClick(lastProject.id, e)}
                                 className={`relative overflow-hidden bg-secondary p-5 rounded-3xl border shadow-lg shadow-primary/5 cursor-pointer active:scale-[0.98] transition-all select-none mb-4 ${lastProject.status === 'completed' ? 'border-green-500/30 bg-green-500/5' : 'border-primary/20'}`}
                             >
                                 <img src="/logo.svg" alt="" className="absolute top-3 right-3 w-16 h-16 opacity-50 pointer-events-none" />
@@ -329,13 +333,13 @@ export default function Dashboard() {
                         {otherProjects.length > 0 && (
                             <div className="grid grid-cols-2 gap-4">
                                 {otherProjects.map((proj) => (
-                                    <Card
+                                    <div
                                         key={proj.id}
-                                        onPointerDown={() => handlePointerDown(proj)}
+                                        onPointerDown={(e) => handlePointerDown(proj, e)}
                                         onPointerUp={handlePointerUp}
                                         onPointerMove={handlePointerMove}
-                                        onClick={() => handleCardClick(proj.id)}
-                                        className={`p-4 active:scale-[0.96] transition-transform flex flex-col justify-between h-32 bg-secondary select-none ${proj.status === 'completed' ? 'border-green-500/30 bg-green-500/5' : 'border-zinc-800'}`}
+                                        onClick={(e) => handleCardClick(proj.id, e)}
+                                        className={`p-4 rounded-xl border active:scale-[0.96] transition-transform flex flex-col justify-between h-32 bg-secondary select-none cursor-pointer ${proj.status === 'completed' ? 'border-green-500/30 bg-green-500/5' : 'border-zinc-800'}`}
                                     >
                                         <div className={`w-8 h-8 rounded-full flex items-center justify-center mb-2 font-bold text-xs ${proj.status === 'completed' ? 'bg-green-500/20 text-green-400' : 'bg-zinc-800 text-zinc-500'}`}>
                                             {proj.status === 'completed' ? <CheckCircle size={14} /> : '#'}
@@ -346,7 +350,7 @@ export default function Dashboard() {
                                                 {proj.status === 'completed' ? 'Terminé' : `Rang ${proj.current_row}`}
                                             </p>
                                         </div>
-                                    </Card>
+                                    </div>
                                 ))}
                             </div>
                         )}

@@ -30,6 +30,9 @@ export default function MaterialEdit() {
             return data as Material;
         },
         enabled: !!id,
+        // 🔥 OFFLINE-FIRST : On utilise le cache si dispo
+        staleTime: 1000 * 60 * 5,
+        retry: false
     });
 
     // Effet pour mettre à jour le formulaire quand les données arrivent

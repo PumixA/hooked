@@ -177,7 +177,7 @@ export default function ProjectCreate() {
                     {/* 2. Catégories (API) */}
                     <div className="space-y-3">
                         <label className="text-xs text-zinc-400 ml-1 uppercase tracking-wider font-bold">Catégorie</label>
-                        
+
                         {isLoadingCategories ? (
                             <div className="flex gap-2 text-zinc-500 text-sm items-center">
                                 <Loader2 className="animate-spin" size={16} /> Chargement des catégories...

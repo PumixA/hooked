@@ -1,6 +1,7 @@
 import { Outlet, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import BottomNavBar from '../components/BottomNavBar';
+import NetworkStatus from '../components/NetworkStatus';
 
 export default function AppLayout() {
     const { user, loading } = useAuth();
@@ -12,6 +13,9 @@ export default function AppLayout() {
 
     return (
         <div className="min-h-screen bg-background text-white">
+            {/* Indicateur de statut réseau global */}
+            <NetworkStatus />
+
             {/* Outlet = L'endroit où les pages (Dashboard, Inventory) s'affichent */}
             <main className="min-h-screen pb-20"> {/* pb-20 pour éviter que le contenu soit caché par la navbar */}
                 <Outlet />
