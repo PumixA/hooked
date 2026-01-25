@@ -121,16 +121,22 @@ export default function ProjectDetail() {
     // D. Notes
     const [noteContent, setNoteContent] = useState('');
 
-    useQuery({
+    const { data: notesData } = useQuery({
         queryKey: ['notes', id],
         queryFn: async () => {
             if (!id || id.startsWith('temp-')) return null;
             const { data } = await api.get(`/notes?project_id=${id}`);
-            if (data?.content) setNoteContent(data.content);
             return data;
         },
         enabled: showNotes && isOnline && !!id && !id.startsWith('temp-')
     });
+
+    // Mise à jour de l'état quand les données arrivent
+    useEffect(() => {
+        if (notesData?.content) {
+            setNoteContent(notesData.content);
+        }
+    }, [notesData]);
 
     const saveNoteMutation = useSafeMutation({
         mutationFn: async () => {
@@ -466,7 +472,7 @@ export default function ProjectDetail() {
                     <div className="pt-4 space-y-3">
                         <Button onClick={handleSaveSettings}>Enregistrer</Button>
                         
-                        <button
+                        <button 
                             onClick={() => { setShowSettings(false); setShowDeleteConfirm(true); }}
                             className="w-full py-3 text-red-400 hover:bg-red-500/10 rounded-xl transition flex items-center justify-center gap-2"
                         >
@@ -492,19 +498,21 @@ export default function ProjectDetail() {
 
             {/* MODALE NOTES */}
             <Modal isOpen={showNotes} onClose={() => setShowNotes(false)} title="Notes">
-                <textarea
-                    className="w-full h-48 bg-zinc-800/50 text-white p-4 rounded-xl resize-none focus:outline-none focus:ring-1 focus:ring-primary placeholder-zinc-600 border border-zinc-700"
-                    placeholder="Écrivez vos notes ici..."
-                    value={noteContent}
-                    onChange={(e) => setNoteContent(e.target.value)}
-                />
-                <div className="mt-4 flex justify-end">
-                    <Button
-                        onClick={() => saveNoteMutation.mutate()}
-                        isLoading={saveNoteMutation.isPending}
-                    >
-                        Sauvegarder
-                    </Button>
+                <div className="flex flex-col h-full">
+                    <textarea
+                        className="flex-1 w-full bg-zinc-800/50 text-white p-4 rounded-xl resize-none focus:outline-none focus:ring-1 focus:ring-primary placeholder-zinc-600 border border-zinc-700 mb-4"
+                        placeholder="Écrivez vos notes ici..."
+                        value={noteContent}
+                        onChange={(e) => setNoteContent(e.target.value)}
+                    />
+                    <div className="flex justify-end shrink-0">
+                        <Button
+                            onClick={() => saveNoteMutation.mutate()}
+                            isLoading={saveNoteMutation.isPending}
+                        >
+                            Sauvegarder
+                        </Button>
+                    </div>
                 </div>
             </Modal>
 
