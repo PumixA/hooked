@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings, TrendingUp, ImagePlus, WifiOff, Trash2 } from 'lucide-react';
+import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings, TrendingUp, ImagePlus, WifiOff, Trash2, CheckCircle, Flag } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import Timer from '../components/features/Timer';
@@ -52,7 +52,6 @@ export default function ProjectDetail() {
     const savedTimeRef = useRef<number>(0);
     const [sessionStartRow, setSessionStartRow] = useState<number | null>(null);
 
-    // Initialisation du timer avec la durée totale venant du back
     useEffect(() => {
         if (project?.total_duration) {
             setElapsed(project.total_duration);
@@ -66,13 +65,12 @@ export default function ProjectDetail() {
     const [showPhotos, setShowPhotos] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+    const [showFinishConfirm, setShowFinishConfirm] = useState(false);
     
-    // États pour les réglages
     const [tempGoal, setTempGoal] = useState<string>('');
     const [tempTitle, setTempTitle] = useState<string>('');
     const [tempTimer, setTempTimer] = useState<string>('');
 
-    // Init des états temporaires quand le projet charge
     useEffect(() => {
         if (project) {
             setTempGoal(project.goal_rows ? project.goal_rows.toString() : '');
@@ -80,7 +78,6 @@ export default function ProjectDetail() {
         }
     }, [project]);
 
-    // Init du timer temporaire quand la modale s'ouvre
     useEffect(() => {
         if (showSettings) {
             const h = Math.floor(elapsed / 3600);
@@ -92,8 +89,6 @@ export default function ProjectDetail() {
 
 
     // --- 2. MUTATIONS OFFLINE-READY ---
-
-    // A. Mise à jour Projet (Compteur, Objectif, Titre, Chrono)
     const updateProjectMutation = useSafeMutation({
         mutationFn: async (updates: any) => await api.patch(`/projects/${id}`, updates),
         syncType: 'UPDATE_PROJECT',
@@ -101,24 +96,21 @@ export default function ProjectDetail() {
         onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects'] })
     });
 
-    // B. Suppression Projet
     const deleteProjectMutation = useSafeMutation({
         mutationFn: async () => await api.delete(`/projects/${id}`),
         syncType: 'DELETE_PROJECT',
-        queryKey: ['projects'], // On invalide la liste
+        queryKey: ['projects'],
         onSuccess: () => {
             navigate('/');
         }
     });
 
-    // C. Sauvegarde Session (Timer)
     const saveSessionMutation = useSafeMutation({
         mutationFn: async (sessionData: any) => await api.post('/sessions', sessionData),
         syncType: 'SAVE_SESSION',
         queryKey: ['sessions', id!]
     });
 
-    // D. Notes
     const [noteContent, setNoteContent] = useState('');
 
     const { data: notesData } = useQuery({
@@ -131,7 +123,6 @@ export default function ProjectDetail() {
         enabled: showNotes && isOnline && !!id && !id.startsWith('temp-')
     });
 
-    // Mise à jour de l'état quand les données arrivent
     useEffect(() => {
         if (notesData?.content) {
             setNoteContent(notesData.content);
@@ -148,7 +139,6 @@ export default function ProjectDetail() {
         onSuccess: () => setShowNotes(false)
     });
 
-    // --- 3. MUTATION ONLINE ONLY (PHOTOS) ---
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const uploadPhotoMutation = useMutation({
@@ -183,8 +173,6 @@ export default function ProjectDetail() {
     });
 
     // --- LOGIQUE METIER ---
-
-    // Timer Interval
     useEffect(() => {
         let interval: any = null;
         if (isActive) {
@@ -199,15 +187,14 @@ export default function ProjectDetail() {
         return () => clearInterval(interval);
     }, [isActive]);
 
-    // Actions Timer
     const handleToggleTimer = () => {
+        if (project?.status === 'completed') return;
+
         if (isActive) {
-            // STOP
             const now = Date.now();
             const start = startTimeRef.current || now;
             const duration = Math.floor((now - start) / 1000);
 
-            // 1. Sauvegarder la session (historique)
             if (duration > 2 && project) {
                 saveSessionMutation.mutate({
                     project_id: project.id,
@@ -216,21 +203,17 @@ export default function ProjectDetail() {
                     duration_seconds: duration
                 });
             }
-
-            // 2. Mettre à jour le temps total du projet
-            const newTotalDuration = elapsed;
-            savedTimeRef.current = newTotalDuration;
+            savedTimeRef.current = elapsed;
             
             if (project) {
                 updateProjectMutation.mutate({
                     id: project.id,
-                    total_duration: newTotalDuration
+                    total_duration: elapsed
                 });
             }
 
             setIsActive(false);
         } else {
-            // START
             startTimeRef.current = Date.now();
             setIsActive(true);
             if (sessionStartRow === null && project) {
@@ -240,13 +223,14 @@ export default function ProjectDetail() {
     };
 
     const handleResetTimer = () => {
+        if (project?.status === 'completed') return;
+
         setIsActive(false);
         setElapsed(0);
         savedTimeRef.current = 0;
         startTimeRef.current = null;
         setSessionStartRow(null);
         
-        // Reset en base aussi
         if (project) {
             updateProjectMutation.mutate({
                 id: project.id,
@@ -255,8 +239,8 @@ export default function ProjectDetail() {
         }
     };
 
-    // Estimation
     const getEstimation = () => {
+        if (project?.status === 'completed') return "Projet terminé ! 🎉";
         if (!project?.goal_rows || elapsed < 60 || sessionStartRow === null) return null;
         const rowsDoneInSession = project.current_row - sessionStartRow;
         if (rowsDoneInSession <= 0) return null;
@@ -270,9 +254,9 @@ export default function ProjectDetail() {
         return `Fin estimée dans ${h > 0 ? `${h}h ` : ''}${m}m`;
     };
 
-    // Compteur
     const updateCounter = (increment: number) => {
-        if (!project) return;
+        if (!project || project.status === 'completed') return;
+        
         const amount = increment * step;
         const newCount = Math.max(0, project.current_row + amount);
 
@@ -286,9 +270,13 @@ export default function ProjectDetail() {
         if (project.goal_rows && newCount >= project.goal_rows && project.status !== 'completed') {
             updates.status = 'completed';
             updates.end_date = new Date().toISOString();
+            // On arrête le timer si actif
+            if (isActive) {
+                setIsActive(false);
+                // On pourrait sauvegarder la session ici aussi
+            }
         }
 
-        // Optimistic Update local
         queryClient.setQueryData(['projects', id], (old: Project) => ({
             ...old,
             ...updates
@@ -299,9 +287,8 @@ export default function ProjectDetail() {
 
     const handleSaveSettings = () => {
         if (!project) return;
-        const newGoal = tempGoal ? parseInt(tempGoal) : null; // null pour supprimer l'objectif
+        const newGoal = tempGoal ? parseInt(tempGoal) : null;
 
-        // Mise à jour du timer manuel
         const [h, m, s] = tempTimer.split(':').map(Number);
         let newElapsed = elapsed;
         
@@ -309,14 +296,14 @@ export default function ProjectDetail() {
             newElapsed = h * 3600 + m * 60 + s;
             setElapsed(newElapsed);
             savedTimeRef.current = newElapsed;
-            if (isActive) startTimeRef.current = Date.now(); // Reset start time pour éviter les sauts
+            if (isActive) startTimeRef.current = Date.now();
         }
 
         updateProjectMutation.mutate({
             id: project.id,
             title: tempTitle,
             goal_rows: newGoal,
-            total_duration: newElapsed // On sauvegarde aussi le temps modifié
+            total_duration: newElapsed
         });
         setShowSettings(false);
     };
@@ -324,6 +311,19 @@ export default function ProjectDetail() {
     const handleDeleteProject = () => {
         if (!project) return;
         deleteProjectMutation.mutate({ id: project.id });
+    };
+
+    const handleFinishProject = () => {
+        if (!project) return;
+        
+        if (isActive) handleToggleTimer();
+
+        updateProjectMutation.mutate({
+            id: project.id,
+            status: 'completed',
+            end_date: new Date().toISOString()
+        });
+        setShowFinishConfirm(false);
     };
 
 
@@ -343,6 +343,7 @@ export default function ProjectDetail() {
 
     const estimation = getEstimation();
     const isOfflineProject = id?.startsWith('temp-');
+    const isCompleted = project.status === 'completed';
 
     return (
         <div className="h-[100dvh] w-screen bg-background text-white flex flex-col animate-fade-in overflow-hidden">
@@ -353,24 +354,38 @@ export default function ProjectDetail() {
                     <ArrowLeft size={20} />
                     <span className="text-xs">Retour</span>
                 </button>
-                <div className="flex gap-2">
+                
+                <h1 className="font-bold text-lg truncate text-center flex-1 px-2 flex items-center justify-center gap-2">
+                    {project.title}
+                    {isCompleted && <CheckCircle size={16} className="text-green-400" />}
+                </h1>
+                
+                <div className="w-12 flex justify-end gap-2">
                     {isOfflineProject && (
                         <span className="text-[10px] bg-orange-500/20 text-orange-400 px-1 py-1 rounded-full border border-orange-500/50 flex items-center gap-1">
-                            <WifiOff size={10} /> Local
+                            <WifiOff size={10} />
                         </span>
                     )}
+                    
+                    {/* Bouton Terminer (si pas fini) */}
+                    {!isCompleted && (
+                        <button onClick={() => setShowFinishConfirm(true)} className="p-2 rounded-full bg-zinc-800 text-green-400 hover:text-green-300 transition">
+                            <Flag size={18} />
+                        </button>
+                    )}
+
                     <button onClick={() => setShowSettings(true)} className="p-2 rounded-full bg-zinc-800 text-zinc-400 hover:text-white transition">
                         <Settings size={18} />
                     </button>
                 </div>
             </div>
 
-            {/* 2. CONTENU PRINCIPAL (entre header et menu natif) */}
+            {/* 2. CONTENU PRINCIPAL */}
             <div className="fixed top-14 left-0 right-0 bottom-[60px] flex flex-col overflow-hidden">
                 
                 {/* TIMER */}
                 <div className="shrink-0 flex flex-col items-center justify-center py-2 bg-background">
-                    <div className="scale-75">
+                    <div className={`scale-75 transition-opacity ${isCompleted ? 'opacity-50 grayscale' : ''}`}>
                         <Timer
                             elapsed={elapsed}
                             isActive={isActive}
@@ -386,15 +401,14 @@ export default function ProjectDetail() {
                     )}
                 </div>
 
-                {/* COMPTEUR (Prend l'espace restant) */}
+                {/* COMPTEUR */}
                 <div className="flex-1 flex flex-col items-center justify-center min-h-0 relative">
-                    <div className="text-[20vh] font-bold leading-none tracking-tighter select-none flex items-center justify-center">
+                    <div className={`text-[20vh] font-bold leading-none tracking-tighter select-none flex items-center justify-center transition-colors ${isCompleted ? 'text-green-400' : ''}`}>
                         {project.current_row}
                     </div>
                     
-                    {/* Objectif + Pas */}
                     <div className="flex flex-col items-center gap-1 mt-1">
-                        {step > 1 && (
+                        {!isCompleted && step > 1 && (
                             <div className="bg-primary/20 text-primary text-[10px] px-2 py-0.5 rounded-full font-bold">
                                 Pas : +/- {step}
                             </div>
@@ -412,7 +426,7 @@ export default function ProjectDetail() {
                 </div>
 
                 {/* CONTRÔLES +/- */}
-                <div className="shrink-0 flex items-center justify-center gap-8 py-3 bg-background">
+                <div className={`shrink-0 flex items-center justify-center gap-8 py-3 bg-background transition-opacity ${isCompleted ? 'opacity-0 pointer-events-none' : ''}`}>
                     <button onClick={() => updateCounter(-1)} className="w-14 h-14 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 shadow-lg active:scale-90 transition-transform">
                         <Minus size={22} />
                     </button>
@@ -478,6 +492,20 @@ export default function ProjectDetail() {
                         >
                             <Trash2 size={18} /> Supprimer le projet
                         </button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* MODALE CONFIRMATION FIN */}
+            <Modal isOpen={showFinishConfirm} onClose={() => setShowFinishConfirm(false)} title="Terminer ?">
+                <div className="space-y-4 text-center">
+                    <p className="text-zinc-400">
+                        Bravo ! Vous avez terminé ce projet ?<br/>
+                        Il sera marqué comme complété.
+                    </p>
+                    <div className="flex gap-3 mt-6">
+                        <Button variant="secondary" onClick={() => setShowFinishConfirm(false)} className="flex-1">Annuler</Button>
+                        <Button onClick={handleFinishProject} className="flex-1 bg-green-500 hover:bg-green-600 text-white">Oui, terminé !</Button>
                     </div>
                 </div>
             </Modal>

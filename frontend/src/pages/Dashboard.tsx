@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Settings, Plus, Loader2, Clock, WifiOff, Package, Cloud, RefreshCw, Trash2, Edit2 } from 'lucide-react';
+import { Settings, Plus, Loader2, Clock, WifiOff, Package, Cloud, RefreshCw, Trash2, Edit2, CheckCircle } from 'lucide-react';
 import api from '../services/api';
 import Card from '../components/ui/Card';
 import Navbar from '../components/BottomNavBar';
@@ -21,7 +21,7 @@ interface Project {
 
 export default function Dashboard() {
     const navigate = useNavigate();
-    const { queue, isOnline, syncNow, addToQueue } = useSync(); // <--- AJOUT addToQueue
+    const { queue, isOnline, syncNow, addToQueue } = useSync();
     const [isRefreshing, setIsRefreshing] = useState(false);
     const queryClient = useQueryClient();
 
@@ -48,12 +48,10 @@ export default function Dashboard() {
             if (isOnline) {
                 await api.put(`/projects/${id}`, { title });
             } else {
-                // Gestion Offline
                 addToQueue('UPDATE_PROJECT', { id, title });
             }
         },
         onMutate: async ({ id, title }) => {
-            // Optimistic Update
             await queryClient.cancelQueries({ queryKey: ['projects'] });
             const previousProjects = queryClient.getQueryData<Project[]>(['projects']);
 
@@ -81,12 +79,10 @@ export default function Dashboard() {
             if (isOnline) {
                 await api.delete(`/projects/${id}`);
             } else {
-                // Gestion Offline
                 addToQueue('DELETE_PROJECT', { id });
             }
         },
         onMutate: async (id) => {
-            // Optimistic Update
             await queryClient.cancelQueries({ queryKey: ['projects'] });
             const previousProjects = queryClient.getQueryData<Project[]>(['projects']);
 
@@ -151,7 +147,7 @@ export default function Dashboard() {
             setSelectedProject(project);
             setNewTitle(project.title);
             setIsMenuOpen(true);
-        }, 600); // 600ms pour déclencher le menu
+        }, 600);
     };
 
     const handlePointerUp = () => {
@@ -217,7 +213,6 @@ export default function Dashboard() {
                     </div>
                     <div className="flex items-center gap-3">
 
-                        {/* BOUTON DE SYNCHRO INTELLIGENT */}
                         <button
                             onClick={() => isOnline && queue.length > 0 ? syncNow() : null}
                             disabled={!isOnline && queue.length === 0}
@@ -293,12 +288,16 @@ export default function Dashboard() {
                                 onPointerUp={handlePointerUp}
                                 onPointerMove={handlePointerMove}
                                 onClick={() => handleCardClick(lastProject.id)}
-                                className="relative overflow-hidden bg-secondary p-5 rounded-3xl border border-primary/20 shadow-lg shadow-primary/5 cursor-pointer active:scale-[0.98] transition-all select-none"
+                                className={`relative overflow-hidden bg-secondary p-5 rounded-3xl border shadow-lg shadow-primary/5 cursor-pointer active:scale-[0.98] transition-all select-none ${lastProject.status === 'completed' ? 'border-green-500/30 bg-green-500/5' : 'border-primary/20'}`}
                             >
                                 <img src="/logo.svg" alt="" className="absolute top-3 right-3 w-16 h-16 opacity-50 pointer-events-none" />
-                                <span className="inline-block bg-primary/20 text-primary text-[10px] px-3 py-1 rounded-full font-bold uppercase tracking-wider mb-3">
-                                    Dernier projet
-                                </span>
+                                <div className="flex items-center gap-2 mb-3">
+                                    <span className={`inline-block text-[10px] px-3 py-1 rounded-full font-bold uppercase tracking-wider ${lastProject.status === 'completed' ? 'bg-green-500/20 text-green-400' : 'bg-primary/20 text-primary'}`}>
+                                        {lastProject.status === 'completed' ? 'Terminé' : 'Dernier projet'}
+                                    </span>
+                                    {lastProject.status === 'completed' && <CheckCircle size={14} className="text-green-400" />}
+                                </div>
+                                
                                 <h3 className="text-2xl font-bold mb-2 truncate">{lastProject.title}</h3>
                                 <div className="mt-6">
                                     <div className="flex justify-between text-xs text-zinc-400 mb-2 font-medium">
@@ -307,7 +306,7 @@ export default function Dashboard() {
                                     </div>
                                     <div className="w-full bg-zinc-800 h-2.5 rounded-full overflow-hidden">
                                         <div
-                                            className="bg-primary h-full transition-all duration-700 ease-out"
+                                            className={`h-full transition-all duration-700 ease-out ${lastProject.status === 'completed' ? 'bg-green-500' : 'bg-primary'}`}
                                             style={{ width: `${lastProject.goal_rows ? Math.min(100, (lastProject.current_row / lastProject.goal_rows) * 100) : 5}%` }}
                                         />
                                     </div>
@@ -325,14 +324,16 @@ export default function Dashboard() {
                                         onPointerUp={handlePointerUp}
                                         onPointerMove={handlePointerMove}
                                         onClick={() => handleCardClick(proj.id)}
-                                        className="p-4 active:scale-[0.96] transition-transform flex flex-col justify-between h-32 bg-secondary border-zinc-800 select-none"
+                                        className={`p-4 active:scale-[0.96] transition-transform flex flex-col justify-between h-32 bg-secondary select-none ${proj.status === 'completed' ? 'border-green-500/30 bg-green-500/5' : 'border-zinc-800'}`}
                                     >
-                                        <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-500 mb-2 font-bold text-xs">
-                                            #
+                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center mb-2 font-bold text-xs ${proj.status === 'completed' ? 'bg-green-500/20 text-green-400' : 'bg-zinc-800 text-zinc-500'}`}>
+                                            {proj.status === 'completed' ? <CheckCircle size={14} /> : '#'}
                                         </div>
                                         <div>
                                             <h4 className="font-bold text-sm truncate">{proj.title}</h4>
-                                            <p className="text-xs text-primary mt-1">Rang {proj.current_row}</p>
+                                            <p className={`text-xs mt-1 ${proj.status === 'completed' ? 'text-green-400' : 'text-primary'}`}>
+                                                {proj.status === 'completed' ? 'Terminé' : `Rang ${proj.current_row}`}
+                                            </p>
                                         </div>
                                     </Card>
                                 ))}
