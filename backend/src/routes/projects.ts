@@ -12,34 +12,31 @@ const createProjectSchema = z.object({
 
 // Validation Zod pour la mise à jour (PATCH)
 const updateProjectSchema = z.object({
-    title: z.string().optional(), // <--- AJOUT DU TITRE
+    title: z.string().optional(),
     current_row: z.number().optional(),
     status: z.enum(['in_progress', 'completed', 'archived']).optional(),
-    goal_rows: z.number().optional(),
-    updated_at: z.string().datetime().optional() // Pour la synchro
+    goal_rows: z.number().nullable().optional(),
+    total_duration: z.number().optional(), // Permet de sauvegarder le chrono
+    end_date: z.string().datetime().optional(), // Permet de sauvegarder la date de fin
+    updated_at: z.string().datetime().optional()
 });
 
 export async function projectsRoutes(server: FastifyInstance) {
 
-    // Sécurisation globale de toutes les routes /projects
     server.addHook('onRequest', server.authenticate);
 
-    // 1. LISTER LES PROJETS (GET /projects)
+    // 1. LISTER LES PROJETS
     server.get('/', async (request, reply) => {
         const userId = request.user.id;
-
         const projects = await prisma.projects.findMany({
             where: { user_id: userId },
             orderBy: { updated_at: 'desc' },
-            include: {
-                categories: true
-            }
+            include: { categories: true }
         });
-
         return projects;
     });
 
-    // 2. CRÉER UN PROJET (POST /projects)
+    // 2. CRÉER UN PROJET
     server.post('/', async (request, reply) => {
         const result = createProjectSchema.safeParse(request.body);
         if (!result.success) return reply.code(400).send(result.error.issues);
@@ -64,19 +61,14 @@ export async function projectsRoutes(server: FastifyInstance) {
         }
     });
 
-    // 3. VOIR UN PROJET (GET /projects/:id)
+    // 3. VOIR UN PROJET
     server.get('/:id', async (request, reply) => {
         const { id } = request.params as { id: string };
         const userId = request.user.id;
 
         const project = await prisma.projects.findFirst({
-            where: {
-                id: id,
-                user_id: userId // Sécurité : on vérifie que c'est bien son projet
-            },
-            include: {
-                categories: true
-            }
+            where: { id: id, user_id: userId },
+            include: { categories: true } // On n'inclut plus sessions pour le calcul forcé
         });
 
         if (!project) {
@@ -86,14 +78,13 @@ export async function projectsRoutes(server: FastifyInstance) {
         return project;
     });
 
-    // 4. METTRE À JOUR UN PROJET (PATCH /projects/:id)
+    // 4. METTRE À JOUR UN PROJET
     server.patch('/:id', async (request, reply) => {
         const { id } = request.params as { id: string };
         const result = updateProjectSchema.safeParse(request.body);
 
         if (!result.success) return reply.code(400).send(result.error.issues);
 
-        // Vérifier que le projet appartient bien à l'utilisateur
         const existing = await prisma.projects.findFirst({
             where: { id, user_id: request.user.id }
         });
@@ -105,7 +96,6 @@ export async function projectsRoutes(server: FastifyInstance) {
                 where: { id },
                 data: {
                     ...result.data,
-                    // Si le frontend envoie une date updated_at (synchro), on la prend, sinon Date.now()
                     updated_at: result.data.updated_at ? result.data.updated_at : new Date()
                 }
             });
@@ -116,40 +106,11 @@ export async function projectsRoutes(server: FastifyInstance) {
         }
     });
 
-    // 4bis. METTRE À JOUR UN PROJET (PUT /projects/:id) - Pour compatibilité
-    server.put('/:id', async (request, reply) => {
-        const { id } = request.params as { id: string };
-        const result = updateProjectSchema.safeParse(request.body);
-
-        if (!result.success) return reply.code(400).send(result.error.issues);
-
-        const existing = await prisma.projects.findFirst({
-            where: { id, user_id: request.user.id }
-        });
-
-        if (!existing) return reply.code(404).send({ error: "Projet introuvable" });
-
-        try {
-            const updated = await prisma.projects.update({
-                where: { id },
-                data: {
-                    ...result.data,
-                    updated_at: new Date()
-                }
-            });
-            return updated;
-        } catch (err) {
-            server.log.error(err);
-            return reply.code(500).send({ error: "Erreur de mise à jour" });
-        }
-    });
-
-    // 5. SUPPRIMER UN PROJET (DELETE /projects/:id)
+    // 5. SUPPRIMER UN PROJET
     server.delete('/:id', async (request, reply) => {
         const { id } = request.params as { id: string };
         const userId = request.user.id;
 
-        // Vérifier que le projet appartient bien à l'utilisateur
         const existing = await prisma.projects.findFirst({
             where: { id, user_id: userId }
         });
@@ -157,10 +118,12 @@ export async function projectsRoutes(server: FastifyInstance) {
         if (!existing) return reply.code(404).send({ error: "Projet introuvable" });
 
         try {
-            await prisma.projects.delete({
-                where: { id }
-            });
-            return reply.code(204).send(); // 204 No Content
+            await prisma.sessions.deleteMany({ where: { project_id: id } });
+            await prisma.notes.deleteMany({ where: { project_id: id } });
+            await prisma.photos.deleteMany({ where: { project_id: id } });
+            
+            await prisma.projects.delete({ where: { id } });
+            return reply.code(204).send();
         } catch (err) {
             server.log.error(err);
             return reply.code(500).send({ error: "Erreur lors de la suppression" });

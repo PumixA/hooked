@@ -15,6 +15,8 @@ interface Project {
     title: string;
     current_row: number;
     goal_rows?: number;
+    total_duration?: number;
+    status?: string;
 }
 
 interface Photo {
@@ -50,13 +52,21 @@ export default function ProjectDetail() {
     const savedTimeRef = useRef<number>(0);
     const [sessionStartRow, setSessionStartRow] = useState<number | null>(null);
 
+    // Initialisation du timer avec la durée totale venant du back
+    useEffect(() => {
+        if (project?.total_duration) {
+            setElapsed(project.total_duration);
+            savedTimeRef.current = project.total_duration;
+        }
+    }, [project?.total_duration]);
+
     // --- ÉTATS UI ---
     const [step, setStep] = useState(1);
     const [showNotes, setShowNotes] = useState(false);
     const [showPhotos, setShowPhotos] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-
+    
     // États pour les réglages
     const [tempGoal, setTempGoal] = useState<string>('');
     const [tempTitle, setTempTitle] = useState<string>('');
@@ -83,7 +93,7 @@ export default function ProjectDetail() {
 
     // --- 2. MUTATIONS OFFLINE-READY ---
 
-    // A. Mise à jour Projet (Compteur, Objectif, Titre)
+    // A. Mise à jour Projet (Compteur, Objectif, Titre, Chrono)
     const updateProjectMutation = useSafeMutation({
         mutationFn: async (updates: any) => await api.patch(`/projects/${id}`, updates),
         syncType: 'UPDATE_PROJECT',
@@ -191,6 +201,7 @@ export default function ProjectDetail() {
             const start = startTimeRef.current || now;
             const duration = Math.floor((now - start) / 1000);
 
+            // 1. Sauvegarder la session (historique)
             if (duration > 2 && project) {
                 saveSessionMutation.mutate({
                     project_id: project.id,
@@ -199,7 +210,18 @@ export default function ProjectDetail() {
                     duration_seconds: duration
                 });
             }
-            savedTimeRef.current = elapsed;
+
+            // 2. Mettre à jour le temps total du projet
+            const newTotalDuration = elapsed;
+            savedTimeRef.current = newTotalDuration;
+            
+            if (project) {
+                updateProjectMutation.mutate({
+                    id: project.id,
+                    total_duration: newTotalDuration
+                });
+            }
+
             setIsActive(false);
         } else {
             // START
@@ -217,6 +239,14 @@ export default function ProjectDetail() {
         savedTimeRef.current = 0;
         startTimeRef.current = null;
         setSessionStartRow(null);
+        
+        // Reset en base aussi
+        if (project) {
+            updateProjectMutation.mutate({
+                id: project.id,
+                total_duration: 0
+            });
+        }
     };
 
     // Estimation
@@ -240,15 +270,25 @@ export default function ProjectDetail() {
         const amount = increment * step;
         const newCount = Math.max(0, project.current_row + amount);
 
-        queryClient.setQueryData(['projects', id], (old: Project) => ({
-            ...old,
-            current_row: newCount
-        }));
-
-        updateProjectMutation.mutate({
+        // Vérification si objectif atteint
+        let updates: any = {
             id: project.id,
             current_row: newCount
-        });
+        };
+
+        // Si on atteint l'objectif pour la première fois
+        if (project.goal_rows && newCount >= project.goal_rows && project.status !== 'completed') {
+            updates.status = 'completed';
+            updates.end_date = new Date().toISOString();
+        }
+
+        // Optimistic Update local
+        queryClient.setQueryData(['projects', id], (old: Project) => ({
+            ...old,
+            ...updates
+        }));
+
+        updateProjectMutation.mutate(updates);
     };
 
     const handleSaveSettings = () => {
@@ -257,8 +297,10 @@ export default function ProjectDetail() {
 
         // Mise à jour du timer manuel
         const [h, m, s] = tempTimer.split(':').map(Number);
+        let newElapsed = elapsed;
+        
         if (!isNaN(h) && !isNaN(m) && !isNaN(s)) {
-            const newElapsed = h * 3600 + m * 60 + s;
+            newElapsed = h * 3600 + m * 60 + s;
             setElapsed(newElapsed);
             savedTimeRef.current = newElapsed;
             if (isActive) startTimeRef.current = Date.now(); // Reset start time pour éviter les sauts
@@ -267,7 +309,8 @@ export default function ProjectDetail() {
         updateProjectMutation.mutate({
             id: project.id,
             title: tempTitle,
-            goal_rows: newGoal
+            goal_rows: newGoal,
+            total_duration: newElapsed // On sauvegarde aussi le temps modifié
         });
         setShowSettings(false);
     };
@@ -298,20 +341,16 @@ export default function ProjectDetail() {
     return (
         <div className="h-[100dvh] w-screen bg-background text-white flex flex-col animate-fade-in overflow-hidden">
 
-            {/* 1. HEADER FIXED (Sans bordure) */}
-            <div className="fixed top-0 left-0 right-0 h-14 flex items-center justify-between px-4 bg-background z-50">
-                <div className="w-12 flex justify-start">
-                    <button onClick={() => navigate('/')} className="flex items-center gap-1 text-zinc-400 hover:text-white transition p-2 -ml-2">
-                        <ArrowLeft size={20} />
-                    </button>
-                </div>
-
-                <h1 className="font-bold text-lg truncate text-center flex-1 px-2">{project.title}</h1>
-
-                <div className="w-12 flex justify-end gap-2">
+            {/* 1. HEADER FIXED */}
+            <div className="fixed top-0 left-0 right-0 z-20 flex justify-between items-center px-4 py-2 bg-background/95 backdrop-blur-sm h-14 border-b border-zinc-800/30">
+                <button onClick={() => navigate('/')} className="flex items-center gap-1 text-zinc-400 hover:text-white transition p-2 -ml-2">
+                    <ArrowLeft size={20} />
+                    <span className="text-xs">Retour</span>
+                </button>
+                <div className="flex gap-2">
                     {isOfflineProject && (
-                        <span className="text-[10px] bg-orange-500/20 text-orange-400 px-1 py-1 rounded-full border border-orange-500/50 flex items-center">
-                            <WifiOff size={10} />
+                        <span className="text-[10px] bg-orange-500/20 text-orange-400 px-1 py-1 rounded-full border border-orange-500/50 flex items-center gap-1">
+                            <WifiOff size={10} /> Local
                         </span>
                     )}
                     <button onClick={() => setShowSettings(true)} className="p-2 rounded-full bg-zinc-800 text-zinc-400 hover:text-white transition">
@@ -322,7 +361,7 @@ export default function ProjectDetail() {
 
             {/* 2. CONTENU PRINCIPAL (entre header et menu natif) */}
             <div className="fixed top-14 left-0 right-0 bottom-[60px] flex flex-col overflow-hidden">
-
+                
                 {/* TIMER */}
                 <div className="shrink-0 flex flex-col items-center justify-center py-2 bg-background">
                     <div className="scale-75">
@@ -346,7 +385,7 @@ export default function ProjectDetail() {
                     <div className="text-[20vh] font-bold leading-none tracking-tighter select-none flex items-center justify-center">
                         {project.current_row}
                     </div>
-
+                    
                     {/* Objectif + Pas */}
                     <div className="flex flex-col items-center gap-1 mt-1">
                         {step > 1 && (
@@ -354,7 +393,7 @@ export default function ProjectDetail() {
                                 Pas : +/- {step}
                             </div>
                         )}
-
+                        
                         {project.goal_rows ? (
                             <div onClick={() => setShowSettings(true)} className="text-zinc-500 flex items-center gap-2 cursor-pointer hover:text-zinc-300 transition px-2 py-1 rounded-lg hover:bg-zinc-800/50 text-xs">
                                 <span>sur {project.goal_rows} rangs</span>
@@ -394,12 +433,12 @@ export default function ProjectDetail() {
             {/* MODALE SETTINGS */}
             <Modal isOpen={showSettings} onClose={() => setShowSettings(false)} title="Réglages du projet">
                 <div className="space-y-6">
-                    <Input
-                        label="Nom du projet"
-                        value={tempTitle}
-                        onChange={(e) => setTempTitle(e.target.value)}
+                    <Input 
+                        label="Nom du projet" 
+                        value={tempTitle} 
+                        onChange={(e) => setTempTitle(e.target.value)} 
                     />
-
+                    
                     <div className="space-y-2">
                         <label className="text-xs text-zinc-400 ml-1">Pas d'incrémentation</label>
                         <div className="flex gap-2">
@@ -409,24 +448,24 @@ export default function ProjectDetail() {
                         </div>
                     </div>
 
-                    <Input
-                        label="Objectif de rangs"
-                        type="number"
-                        value={tempGoal}
-                        onChange={(e) => setTempGoal(e.target.value)}
-                        placeholder="Infini"
+                    <Input 
+                        label="Objectif de rangs" 
+                        type="number" 
+                        value={tempGoal} 
+                        onChange={(e) => setTempGoal(e.target.value)} 
+                        placeholder="Infini" 
                     />
 
-                    <Input
-                        label="Temps écoulé (HH:MM:SS)"
-                        value={tempTimer}
-                        onChange={(e) => setTempTimer(e.target.value)}
+                    <Input 
+                        label="Temps écoulé (HH:MM:SS)" 
+                        value={tempTimer} 
+                        onChange={(e) => setTempTimer(e.target.value)} 
                         placeholder="00:00:00"
                     />
 
                     <div className="pt-4 space-y-3">
                         <Button onClick={handleSaveSettings}>Enregistrer</Button>
-
+                        
                         <button
                             onClick={() => { setShowSettings(false); setShowDeleteConfirm(true); }}
                             className="w-full py-3 text-red-400 hover:bg-red-500/10 rounded-xl transition flex items-center justify-center gap-2"
