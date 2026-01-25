@@ -6,9 +6,10 @@ interface ModalProps {
     onClose: () => void;
     title: string;
     children: ReactNode;
+    zIndex?: number;
 }
 
-export default function Modal({ isOpen, onClose, title, children }: ModalProps) {
+export default function Modal({ isOpen, onClose, title, children, zIndex = 100 }: ModalProps) {
     const [isMaximized, setIsMaximized] = useState(false);
 
     // 1. Bloquer le scroll de l'arrière-plan quand la modale est ouverte
@@ -26,7 +27,10 @@ export default function Modal({ isOpen, onClose, title, children }: ModalProps) 
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in">
+        <div 
+            className="fixed inset-0 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in"
+            style={{ zIndex }}
+        >
             
             {/* Zone cliquable pour fermer en cliquant dehors */}
             <div className="absolute inset-0" onClick={onClose} />

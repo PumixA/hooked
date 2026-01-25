@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings, TrendingUp, ImagePlus, WifiOff, Trash2, CheckCircle, Flag } from 'lucide-react';
+import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings, TrendingUp, ImagePlus, WifiOff, Trash2, CheckCircle, Flag, X, ChevronLeft, ChevronRight, Check } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../services/api';
 import Timer from '../components/features/Timer';
@@ -24,6 +24,21 @@ interface Photo {
     file_path: string;
     created_at: string;
 }
+
+// --- COMPOSANT TOAST SIMPLE ---
+const Toast = ({ message, onClose }: { message: string, onClose: () => void }) => {
+    useEffect(() => {
+        const timer = setTimeout(onClose, 3000);
+        return () => clearTimeout(timer);
+    }, [onClose]);
+
+    return (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[200] bg-zinc-800 text-white px-4 py-2 rounded-full shadow-lg border border-zinc-700 flex items-center gap-2 animate-fade-in pointer-events-none">
+            <CheckCircle size={16} className="text-green-400" />
+            <span className="text-sm font-medium">{message}</span>
+        </div>
+    );
+};
 
 export default function ProjectDetail() {
     const { id } = useParams<{ id: string }>();
@@ -66,7 +81,18 @@ export default function ProjectDetail() {
     const [showSettings, setShowSettings] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [showFinishConfirm, setShowFinishConfirm] = useState(false);
+    const [toastMessage, setToastMessage] = useState<string | null>(null);
     
+    // --- ÉTATS GALERIE & SELECTION ---
+    const [selectedPhotoIndex, setSelectedPhotoIndex] = useState<number | null>(null);
+    const [showGallery, setShowGallery] = useState(false);
+    const [photoToDelete, setPhotoToDelete] = useState<Photo | null>(null);
+    
+    const [isSelectionMode, setIsSelectionMode] = useState(false);
+    const [selectedPhotoIds, setSelectedPhotoIds] = useState<Set<string>>(new Set());
+    const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+    const photoLongPressTimer = useRef<NodeJS.Timeout | null>(null);
+
     const [tempGoal, setTempGoal] = useState<string>('');
     const [tempTitle, setTempTitle] = useState<string>('');
     const [tempTimer, setTempTimer] = useState<string>('');
@@ -139,27 +165,84 @@ export default function ProjectDetail() {
         onSuccess: () => setShowNotes(false)
     });
 
+    // --- NOUVEAU : Suppression de note ---
+    const deleteNoteMutation = useSafeMutation({
+        mutationFn: async () => {
+            if (!project) return;
+            if (notesData?.id) {
+                await api.delete(`/notes/${notesData.id}`);
+            }
+        },
+        syncType: 'DELETE_NOTE',
+        queryKey: ['notes', id!],
+        onSuccess: () => {
+            setNoteContent('');
+            setShowNotes(false);
+            setToastMessage("Note supprimée");
+        }
+    });
+
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const uploadPhotoMutation = useMutation({
-        mutationFn: async (file: File) => {
+        mutationFn: async (files: FileList) => {
             if (!project) throw new Error("Projet manquant");
-            const formData = new FormData();
-            formData.append('file', file);
-            return await api.post(`/photos?project_id=${project.id}`, formData, {
-                headers: { 'Content-Type': 'multipart/form-data' }
+            
+            const promises = Array.from(files).map(file => {
+                const formData = new FormData();
+                formData.append('file', file);
+                return api.post(`/photos?project_id=${project.id}`, formData, {
+                    headers: { 'Content-Type': 'multipart/form-data' }
+                });
             });
+            
+            return await Promise.all(promises);
         },
-        onSuccess: () => {
+        onSuccess: (results) => {
             queryClient.invalidateQueries({ queryKey: ['photos'] });
-            alert("Photo ajoutée ! 📸");
+            setToastMessage(`${results.length} photo(s) ajoutée(s) ! 📸`);
         },
         onError: () => alert("Erreur lors de l'envoi.")
     });
 
+    // --- Suppression de photo unique ---
+    const deletePhotoMutation = useMutation({
+        mutationFn: async (photoId: string) => {
+            await api.delete(`/photos/${photoId}`);
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['photos'] });
+            setPhotoToDelete(null);
+            if (showGallery) {
+                if (photos.length <= 1) {
+                    setShowGallery(false);
+                } else {
+                    setSelectedPhotoIndex(prev => (prev && prev >= photos.length - 1 ? prev - 1 : prev));
+                }
+            }
+            setToastMessage("Photo supprimée");
+        }
+    });
+
+    // --- Suppression multiple ---
+    const deleteMultiplePhotosMutation = useMutation({
+        mutationFn: async (ids: string[]) => {
+            const promises = ids.map(id => api.delete(`/photos/${id}`));
+            return await Promise.all(promises);
+        },
+        onSuccess: (results) => {
+            queryClient.invalidateQueries({ queryKey: ['photos'] });
+            setShowBulkDeleteConfirm(false);
+            setIsSelectionMode(false);
+            setSelectedPhotoIds(new Set());
+            setToastMessage(`${results.length} photos supprimées`);
+        },
+        onError: () => alert("Erreur lors de la suppression multiple.")
+    });
+
     const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-        const file = event.target.files?.[0];
-        if (file) uploadPhotoMutation.mutate(file);
+        const files = event.target.files;
+        if (files && files.length > 0) uploadPhotoMutation.mutate(files);
     };
 
     const { data: photos = [] } = useQuery({
@@ -171,6 +254,58 @@ export default function ProjectDetail() {
         },
         enabled: showPhotos && !!id && !id.startsWith('temp-')
     });
+
+    // --- LOGIQUE GALERIE & SELECTION ---
+    const openGallery = (index: number) => {
+        if (isSelectionMode) return; // Ne pas ouvrir si en mode sélection
+        setSelectedPhotoIndex(index);
+        setShowGallery(true);
+    };
+
+    const toggleSelection = (photoId: string) => {
+        const newSet = new Set(selectedPhotoIds);
+        if (newSet.has(photoId)) {
+            newSet.delete(photoId);
+            if (newSet.size === 0) setIsSelectionMode(false);
+        } else {
+            newSet.add(photoId);
+        }
+        setSelectedPhotoIds(newSet);
+    };
+
+    const handlePhotoPointerDown = (photoId: string) => {
+        if (isSelectionMode) return;
+        photoLongPressTimer.current = setTimeout(() => {
+            setIsSelectionMode(true);
+            setSelectedPhotoIds(new Set([photoId]));
+        }, 500); // 500ms long press
+    };
+
+    const handlePhotoPointerUp = () => {
+        if (photoLongPressTimer.current) {
+            clearTimeout(photoLongPressTimer.current);
+        }
+    };
+
+    const handlePhotoClick = (index: number, photoId: string) => {
+        if (isSelectionMode) {
+            toggleSelection(photoId);
+        } else {
+            openGallery(index);
+        }
+    };
+
+    const nextPhoto = () => {
+        if (selectedPhotoIndex !== null && selectedPhotoIndex < photos.length - 1) {
+            setSelectedPhotoIndex(selectedPhotoIndex + 1);
+        }
+    };
+
+    const prevPhoto = () => {
+        if (selectedPhotoIndex !== null && selectedPhotoIndex > 0) {
+            setSelectedPhotoIndex(selectedPhotoIndex - 1);
+        }
+    };
 
     // --- LOGIQUE METIER ---
     useEffect(() => {
@@ -347,6 +482,9 @@ export default function ProjectDetail() {
 
     return (
         <div className="h-[100dvh] w-screen bg-background text-white flex flex-col animate-fade-in overflow-hidden">
+            
+            {/* TOAST */}
+            {toastMessage && <Toast message={toastMessage} onClose={() => setToastMessage(null)} />}
 
             {/* 1. HEADER FIXED */}
             <div className="fixed top-0 left-0 right-0 z-20 flex justify-between items-center px-4 py-2 bg-background/95 backdrop-blur-sm h-14 border-b border-zinc-800/30">
@@ -533,10 +671,19 @@ export default function ProjectDetail() {
                         value={noteContent}
                         onChange={(e) => setNoteContent(e.target.value)}
                     />
-                    <div className="flex justify-end shrink-0">
+                    <div className="flex justify-between shrink-0 gap-3">
+                        {notesData?.id && (
+                            <button 
+                                onClick={() => deleteNoteMutation.mutate()}
+                                className="p-3 rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500/20 transition"
+                            >
+                                <Trash2 size={20} />
+                            </button>
+                        )}
                         <Button
                             onClick={() => saveNoteMutation.mutate()}
                             isLoading={saveNoteMutation.isPending}
+                            className="flex-1"
                         >
                             Sauvegarder
                         </Button>
@@ -544,32 +691,159 @@ export default function ProjectDetail() {
                 </div>
             </Modal>
 
-            {/* MODALE PHOTOS */}
-            <Modal isOpen={showPhotos} onClose={() => setShowPhotos(false)} title="Photos">
-                <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept="image/*" className="hidden" />
+            {/* MODALE PHOTOS (LISTE) */}
+            <Modal isOpen={showPhotos} onClose={() => { setShowPhotos(false); setIsSelectionMode(false); setSelectedPhotoIds(new Set()); }} title={isSelectionMode ? `${selectedPhotoIds.size} sélectionnée(s)` : "Photos"}>
+                <input type="file" ref={fileInputRef} onChange={handleFileSelect} accept="image/*" multiple className="hidden" />
 
-                <div
-                    onClick={() => isOnline && !isOfflineProject ? fileInputRef.current?.click() : alert("Les photos nécessitent une connexion pour l'instant.")}
-                    className={`border-2 border-dashed border-zinc-700 rounded-xl h-24 flex flex-col items-center justify-center text-zinc-500 hover:border-zinc-500 hover:text-zinc-400 transition cursor-pointer bg-zinc-800/30 mb-6 ${(!isOnline || isOfflineProject) ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                    {uploadPhotoMutation.isPending ? (
-                        <Loader2 size={24} className="animate-spin text-primary" />
-                    ) : (
-                        <div className="flex items-center gap-2">
-                            {(!isOnline || isOfflineProject) ? <WifiOff size={20} /> : <ImagePlus size={20} />}
-                            <span className="text-sm font-medium">
-                                {(!isOnline || isOfflineProject) ? "Disponible en ligne" : "Ajouter une photo"}
-                            </span>
-                        </div>
-                    )}
+                {/* Barre d'action en mode sélection */}
+                {isSelectionMode ? (
+                    <div className="flex gap-3 mb-4">
+                        <button 
+                            onClick={() => { setIsSelectionMode(false); setSelectedPhotoIds(new Set()); }}
+                            className="flex-1 py-3 bg-zinc-800 rounded-xl text-zinc-400 font-medium"
+                        >
+                            Annuler
+                        </button>
+                        <button 
+                            onClick={() => setShowBulkDeleteConfirm(true)}
+                            disabled={selectedPhotoIds.size === 0}
+                            className="flex-1 py-3 bg-red-500/10 text-red-400 rounded-xl font-medium flex items-center justify-center gap-2 disabled:opacity-50"
+                        >
+                            <Trash2 size={18} /> Supprimer
+                        </button>
+                    </div>
+                ) : (
+                    <div
+                        onClick={() => isOnline && !isOfflineProject ? fileInputRef.current?.click() : alert("Les photos nécessitent une connexion pour l'instant.")}
+                        className={`border-2 border-dashed border-zinc-700 rounded-xl h-24 flex flex-col items-center justify-center text-zinc-500 hover:border-zinc-500 hover:text-zinc-400 transition cursor-pointer bg-zinc-800/30 mb-6 ${(!isOnline || isOfflineProject) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                        {uploadPhotoMutation.isPending ? (
+                            <Loader2 size={24} className="animate-spin text-primary" />
+                        ) : (
+                            <div className="flex items-center gap-2">
+                                {(!isOnline || isOfflineProject) ? <WifiOff size={20} /> : <ImagePlus size={20} />}
+                                <span className="text-sm font-medium">
+                                    {(!isOnline || isOfflineProject) ? "Disponible en ligne" : "Ajouter des photos"}
+                                </span>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-3 max-h-[40vh] overflow-y-auto pr-1 scrollbar-hide select-none">
+                    {photos.map((photo: Photo, index: number) => {
+                        const isSelected = selectedPhotoIds.has(photo.id);
+                        return (
+                            <div 
+                                key={photo.id} 
+                                onPointerDown={() => handlePhotoPointerDown(photo.id)}
+                                onPointerUp={handlePhotoPointerUp}
+                                onClick={() => handlePhotoClick(index, photo.id)}
+                                className={`
+                                    relative aspect-square rounded-lg overflow-hidden group cursor-pointer active:scale-95 transition-all
+                                    ${isSelected ? 'ring-4 ring-primary scale-95' : 'bg-zinc-800'}
+                                `}
+                            >
+                                <img src={`http://192.168.1.96:3000${photo.file_path}`} alt="Projet" className="w-full h-full object-cover" />
+                                
+                                {/* Overlay de sélection */}
+                                {isSelected && (
+                                    <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
+                                        <div className="bg-primary text-white rounded-full p-1">
+                                            <Check size={24} strokeWidth={3} />
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
                 </div>
+            </Modal>
 
-                <div className="grid grid-cols-2 gap-3 max-h-[40vh] overflow-y-auto pr-1 scrollbar-hide">
-                    {photos.map((photo: Photo) => (
-                        <div key={photo.id} className="relative aspect-square rounded-lg overflow-hidden group bg-zinc-800">
-                            <img src={`http://192.168.1.96:3000${photo.file_path}`} alt="Projet" className="w-full h-full object-cover" />
-                        </div>
-                    ))}
+            {/* MODALE GALERIE PLEIN ÉCRAN */}
+            {showGallery && selectedPhotoIndex !== null && photos[selectedPhotoIndex] && (
+                <div className="fixed inset-0 z-[150] bg-black flex flex-col animate-fade-in">
+                    {/* Header Galerie - Z-INDEX INCREASED to 20 to be above nav zones */}
+                    <div className="absolute top-0 left-0 right-0 p-4 flex justify-between items-center z-20 bg-gradient-to-b from-black/50 to-transparent pointer-events-none">
+                        <button onClick={() => setShowGallery(false)} className="p-2 text-white/80 hover:text-white pointer-events-auto">
+                            <X size={24} />
+                        </button>
+                        <span className="text-sm font-medium text-white/80">
+                            {selectedPhotoIndex + 1} / {photos.length}
+                        </span>
+                        <button 
+                            onClick={() => setPhotoToDelete(photos[selectedPhotoIndex])}
+                            className="p-2 text-red-400 hover:text-red-300 pointer-events-auto"
+                        >
+                            <Trash2 size={20} />
+                        </button>
+                    </div>
+
+                    {/* Image */}
+                    <div className="flex-1 flex items-center justify-center relative overflow-hidden">
+                        {/* Zone de clic gauche - Z-INDEX 10 */}
+                        <div className="absolute inset-y-0 left-0 w-1/4 z-10" onClick={prevPhoto} />
+                        
+                        <img 
+                            src={`http://192.168.1.96:3000${photos[selectedPhotoIndex].file_path}`} 
+                            alt="Galerie" 
+                            className="max-w-full max-h-full object-contain"
+                        />
+
+                        {/* Zone de clic droit - Z-INDEX 10 */}
+                        <div className="absolute inset-y-0 right-0 w-1/4 z-10" onClick={nextPhoto} />
+
+                        {/* Flèches de navigation (visibles sur desktop ou grand écran) */}
+                        {selectedPhotoIndex > 0 && (
+                            <button onClick={prevPhoto} className="absolute left-4 p-2 bg-black/30 rounded-full text-white/80 hover:bg-black/50 pointer-events-none md:pointer-events-auto z-20">
+                                <ChevronLeft size={32} />
+                            </button>
+                        )}
+                        {selectedPhotoIndex < photos.length - 1 && (
+                            <button onClick={nextPhoto} className="absolute right-4 p-2 bg-black/30 rounded-full text-white/80 hover:bg-black/50 pointer-events-none md:pointer-events-auto z-20">
+                                <ChevronRight size={32} />
+                            </button>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* MODALE CONFIRMATION SUPPRESSION PHOTO UNIQUE */}
+            <Modal isOpen={!!photoToDelete} onClose={() => setPhotoToDelete(null)} title="Supprimer la photo ?" zIndex={200}>
+                <div className="space-y-4 text-center">
+                    <p className="text-zinc-400">
+                        Cette photo sera définitivement supprimée.
+                    </p>
+                    <div className="flex gap-3 mt-6">
+                        <Button variant="secondary" onClick={() => setPhotoToDelete(null)} className="flex-1">Annuler</Button>
+                        <Button 
+                            variant="danger" 
+                            onClick={() => photoToDelete && deletePhotoMutation.mutate(photoToDelete.id)} 
+                            className="flex-1"
+                        >
+                            Supprimer
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* MODALE CONFIRMATION SUPPRESSION MULTIPLE */}
+            <Modal isOpen={showBulkDeleteConfirm} onClose={() => setShowBulkDeleteConfirm(false)} title="Supprimer la sélection ?" zIndex={200}>
+                <div className="space-y-4 text-center">
+                    <p className="text-zinc-400">
+                        Vous allez supprimer <strong>{selectedPhotoIds.size}</strong> photo(s).<br/>
+                        Cette action est irréversible.
+                    </p>
+                    <div className="flex gap-3 mt-6">
+                        <Button variant="secondary" onClick={() => setShowBulkDeleteConfirm(false)} className="flex-1">Annuler</Button>
+                        <Button 
+                            variant="danger" 
+                            onClick={() => deleteMultiplePhotosMutation.mutate(Array.from(selectedPhotoIds))} 
+                            className="flex-1"
+                        >
+                            Supprimer tout
+                        </Button>
+                    </div>
                 </div>
             </Modal>
         </div>
