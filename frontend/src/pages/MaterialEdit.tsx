@@ -1,14 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Loader2, Save, Trash2 } from 'lucide-react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import api from '../services/api';
+import { ArrowLeft, Loader2, Save, WifiOff } from 'lucide-react';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
-import { useSync } from '../context/SyncContext';
+import { useMaterial, useUpdateMaterial } from '../hooks/useOfflineData';
 
-interface Material {
-    category_type: string;
+interface MaterialForm {
+    category_type: 'hook' | 'yarn' | 'needle';
     name: string;
     brand?: string;
     material_composition?: string;
@@ -17,54 +15,54 @@ interface Material {
 export default function MaterialEdit() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
-    const queryClient = useQueryClient();
-    const { isOnline, addToQueue } = useSync();
 
-    const [formData, setFormData] = useState<Material | null>(null);
+    const [formData, setFormData] = useState<MaterialForm | null>(null);
 
-    // 1. Récupérer les données de l'élément
-    const { data: material, isLoading: isLoadingMaterial, isError } = useQuery({
-        queryKey: ['materials', id],
-        queryFn: async () => {
-            const { data } = await api.get(`/materials/${id}`);
-            return data as Material;
-        },
-        enabled: !!id,
-        // 🔥 OFFLINE-FIRST : On utilise le cache si dispo
-        staleTime: 1000 * 60 * 5,
-        retry: false
-    });
+    // État de connexion
+    const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+    useEffect(() => {
+        const handleOnline = () => setIsOnline(true);
+        const handleOffline = () => setIsOnline(false);
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+        return () => {
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
+        };
+    }, []);
+
+    // 🔥 OFFLINE-FIRST: Utilisation des hooks locaux
+    const { data: material, isLoading: isLoadingMaterial, isError } = useMaterial(id);
+    const updateMutation = useUpdateMaterial();
 
     // Effet pour mettre à jour le formulaire quand les données arrivent
     useEffect(() => {
         if (material) {
-            setFormData(material);
+            setFormData({
+                category_type: material.category_type,
+                name: material.name,
+                brand: material.brand,
+                material_composition: material.material_composition
+            });
         }
     }, [material]);
 
-    // 2. Mutation pour la mise à jour
-    const updateMutation = useMutation({
-        mutationFn: async (updatedMaterial: any) => {
-            if (isOnline) {
-                await api.patch(`/materials/${id}`, updatedMaterial);
-            } else {
-                addToQueue('UPDATE_MATERIAL', { id, ...updatedMaterial });
-            }
-        },
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['materials'] });
-            navigate('/inventory');
-        },
-        onError: () => alert("Erreur lors de la mise à jour.")
-    });
-
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!formData || !formData.name) return;
-        updateMutation.mutate(formData);
+        if (!formData || !formData.name || !id) return;
+
+        updateMutation.mutate(
+            { id, ...formData },
+            {
+                onSuccess: () => {
+                    navigate('/inventory');
+                }
+            }
+        );
     };
 
-    const types = [
+    const types: { label: string; value: 'hook' | 'yarn' | 'needle' }[] = [
         { label: 'Crochets', value: 'hook' },
         { label: 'Laine', value: 'yarn' },
         { label: 'Aiguilles', value: 'needle' }
@@ -99,6 +97,11 @@ export default function MaterialEdit() {
                     <ArrowLeft size={24} />
                 </button>
                 <h1 className="text-xl font-bold">Modifier le matériel</h1>
+                {!isOnline && (
+                    <span className="text-[10px] bg-orange-500/20 text-orange-400 px-2 py-1 rounded-full border border-orange-500/50 flex items-center gap-1 ml-auto">
+                        <WifiOff size={12} /> Hors ligne
+                    </span>
+                )}
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-6 max-w-md mx-auto">

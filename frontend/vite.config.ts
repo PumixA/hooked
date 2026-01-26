@@ -46,47 +46,9 @@ export default defineConfig({
         clientsClaim: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
         cleanupOutdatedCaches: true,
-
-        runtimeCaching: [
-          // 1. Stratégie pour les données statiques/référentiels (ex: Categories)
-          {
-            urlPattern: /^http:\/\/192\.168\.1\.96:3000\/categories/,
-            handler: 'StaleWhileRevalidate',
-            options: {
-              cacheName: 'api-static-data',
-              expiration: {
-                maxEntries: 50,
-                maxAgeSeconds: 60 * 60 * 24 * 7 // 7 jours
-              },
-              cacheableResponse: {
-                statuses: [0, 200]
-              }
-            }
-          },
-          // 2. Stratégie pour les données dynamiques (Projets, Sessions, User)
-          {
-            urlPattern: /^http:\/\/192\.168\.1\.96:3000\/(projects|sessions|users|materials|photos|notes).*/,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-dynamic-data',
-              networkTimeoutSeconds: 3, // Timeout réseau court (3s)
-              expiration: {
-                maxEntries: 100,
-                maxAgeSeconds: 60 * 60 * 24 // 24h
-              },
-              cacheableResponse: {
-                statuses: [0, 200]
-              },
-              matchOptions: {
-                ignoreVary: true
-              }
-              // ❌ SUPPRESSION DE handlerDidError : Cette option n'est pas supportée par workbox-build lors de la génération
-              // et cause l'erreur "Cannot read properties of undefined".
-              // Workbox gère déjà le fallback réseau -> cache par défaut.
-            }
-          }
-        ],
-        // 🔥 IMPORTANT : Ne pas rediriger les requêtes API vers index.html en cas d'échec
+        // 🔥 OFFLINE-FIRST via IndexedDB: Pas de cache SW pour l'API
+        // Les données sont gérées par localDb.ts et syncService.ts
+        runtimeCaching: [],
         navigateFallback: null
       }
     })

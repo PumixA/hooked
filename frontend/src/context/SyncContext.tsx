@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import api from '../services/api';
-import { db } from '../services/db';
+import { setOfflineMode } from '../services/api';
+import { syncService } from '../services/syncService';
 
 // --- TYPES ---
 export type SyncActionType =
@@ -14,7 +14,7 @@ export type SyncActionType =
     | 'SAVE_SESSION'
     | 'ADD_NOTE'
     | 'DELETE_NOTE'
-    | 'UPLOAD_PHOTO' // Changed from CREATE_PHOTO to match usage
+    | 'UPLOAD_PHOTO'
     | 'DELETE_PHOTO';
 
 export interface SyncItem {
@@ -30,12 +30,14 @@ interface SyncContextType {
     addToQueue: (type: SyncActionType, payload: any) => void;
     syncNow: () => Promise<void>;
     isSyncing: boolean;
+    logCache: () => void;
+    updateCacheOptimistically: <T>(queryKey: string[], updater: (old: T) => T) => void;
 }
 
 // --- CONTEXTE ---
 const SyncContext = createContext<SyncContextType | null>(null);
 
-// Générateur d'ID compatible mobile
+// Générateur d'ID
 const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
 
 // --- PROVIDER ---
@@ -44,35 +46,43 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // État de connexion
     const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
-
-    // 🔥 Verrou de synchronisation pour éviter les doubles appels
     const [isSyncing, setIsSyncing] = useState(false);
 
-    // 1. Chargement initial sécurisé de la queue
+    // Queue legacy (pour compatibilité)
     const [queue, setQueue] = useState<SyncItem[]>(() => {
         try {
             const saved = localStorage.getItem('sync_queue');
             return saved ? JSON.parse(saved) : [];
-        } catch (e) {
+        } catch {
             return [];
         }
     });
 
-    // 2. Sauvegarde auto de la queue
+    // Sauvegarde auto de la queue
     useEffect(() => {
         localStorage.setItem('sync_queue', JSON.stringify(queue));
     }, [queue]);
 
-    // 3. Écouteurs Réseau (Online/Offline)
+    // Écouteurs Réseau (Online/Offline)
     useEffect(() => {
         const handleOnline = () => {
-            console.log("🟢 Événement : Connexion rétablie !");
+            console.log("🟢 Connexion rétablie");
             setIsOnline(true);
+            setOfflineMode(false);
+            // Sync automatique au retour online
+            syncService.syncAll().then(() => {
+                queryClient.invalidateQueries();
+            });
         };
+
         const handleOffline = () => {
-            console.log("🔴 Événement : Connexion perdue.");
+            console.log("🔴 Connexion perdue");
             setIsOnline(false);
+            setOfflineMode(true);
         };
+
+        // Synchroniser l'état initial
+        setOfflineMode(!navigator.onLine);
 
         window.addEventListener('online', handleOnline);
         window.addEventListener('offline', handleOffline);
@@ -81,35 +91,16 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
             window.removeEventListener('online', handleOnline);
             window.removeEventListener('offline', handleOffline);
         };
+    }, [queryClient]);
+
+    // Sync initiale au démarrage
+    useEffect(() => {
+        if (navigator.onLine) {
+            syncService.syncAll().catch(console.error);
+        }
     }, []);
 
-    // 4. Déclencheur changement d'état (Retour Online)
-    useEffect(() => {
-        if (isOnline && queue.length > 0 && !isSyncing) {
-            console.log("🔄 Connexion rétablie, tentative de sync...");
-            processQueue();
-        }
-    }, [isOnline]);
-
-    // 5. HEARTBEAT (Le Check Régulier)
-    useEffect(() => {
-        const heartbeat = setInterval(() => {
-            const navigatorOnline = navigator.onLine;
-
-            if (navigatorOnline !== isOnline) {
-                console.log(`💓 Heartbeat : Correction de l'état (${isOnline} -> ${navigatorOnline})`);
-                setIsOnline(navigatorOnline);
-            }
-
-            if (queue.length > 0 && navigatorOnline && !isSyncing) {
-                console.log("💓 Heartbeat : Relance file d'attente...");
-                processQueue();
-            }
-        }, 10000);
-
-        return () => clearInterval(heartbeat);
-    }, [queue, isOnline, isSyncing]);
-
+    // Legacy: addToQueue (pour composants non migrés)
     const addToQueue = useCallback((type: SyncActionType, payload: any) => {
         const newItem: SyncItem = {
             id: generateId(),
@@ -117,108 +108,63 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
             payload,
             timestamp: Date.now()
         };
-        console.log(`📥 Ajout à la queue : ${type}`, payload);
+        console.log(`📥 [Legacy Queue] ${type}`, payload);
         setQueue(prev => [...prev, newItem]);
     }, []);
 
-    const processQueue = useCallback(async () => {
-        if (queue.length === 0 || isSyncing) return;
-        if (!navigator.onLine) {
-            console.log("⚠️ Abandon de la sync : pas de connexion réseau");
-            return;
+    // Fonction pour logger l'état du cache
+    const logCache = useCallback(() => {
+        console.log('\n🔍 === DEBUG ===');
+        console.log('Online:', navigator.onLine);
+        console.log('Queue legacy:', queue.length);
+        console.log('React Query cache:', queryClient.getQueryCache().getAll().length, 'entries');
+        // Utiliser le debug de localDb
+        if ((window as any).__localDb) {
+            (window as any).__localDb.debugDump();
         }
+    }, [queryClient, queue]);
 
+    // Mise à jour optimiste du cache
+    const updateCacheOptimistically = useCallback(<T,>(queryKey: string[], updater: (old: T) => T) => {
+        const oldData = queryClient.getQueryData<T>(queryKey);
+        if (oldData !== undefined) {
+            const newData = updater(oldData);
+            queryClient.setQueryData(queryKey, newData);
+        }
+    }, [queryClient]);
+
+    // Sync manuelle
+    const syncNow = useCallback(async () => {
+        if (isSyncing) return;
         setIsSyncing(true);
-
-        console.log(`🔄 Sync : Traitement de ${queue.length} actions...`);
-        const currentQueue = [...queue];
-        const failedItems: SyncItem[] = [];
-        let successCount = 0;
-
         try {
-            for (const item of currentQueue) {
-                try {
-                    switch (item.type) {
-                        case 'CREATE_PROJECT':
-                            await api.post('/projects', item.payload);
-                            break;
-                        case 'UPDATE_PROJECT':
-                            const { id, ...data } = item.payload;
-                            if (!String(id).startsWith('temp-')) {
-                                await api.patch(`/projects/${id}`, data);
-                            }
-                            break;
-                        case 'DELETE_PROJECT':
-                            if (!String(item.payload.id).startsWith('temp-')) {
-                                await api.delete(`/projects/${item.payload.id}`);
-                            }
-                            break;
-                        case 'CREATE_MATERIAL':
-                            await api.post('/materials', item.payload);
-                            break;
-                        case 'UPDATE_MATERIAL':
-                            const { id: matId, ...matData } = item.payload;
-                            await api.patch(`/materials/${matId}`, matData);
-                            break;
-                        case 'DELETE_MATERIAL':
-                            await api.delete(`/materials/${item.payload.id}`);
-                            break;
-                        case 'SAVE_SESSION':
-                            await api.post('/sessions', item.payload);
-                            break;
-                        case 'ADD_NOTE':
-                            await api.post('/notes', item.payload);
-                            break;
-                        case 'DELETE_NOTE':
-                            if (item.payload.id) {
-                                await api.delete(`/notes/${item.payload.id}`);
-                            }
-                            break;
-                        case 'UPLOAD_PHOTO':
-                            console.log(`📸 Sync Photo: Récupération depuis IDB (tempId: ${item.payload.tempId})`);
-                            const offlinePhoto = await db.getOfflinePhoto(item.payload.tempId);
-                            if (offlinePhoto) {
-                                console.log(`📸 Sync Photo: Fichier trouvé (${offlinePhoto.file.size} bytes), envoi...`);
-                                const formData = new FormData();
-                                formData.append('file', offlinePhoto.file);
-                                await api.post(`/photos?project_id=${offlinePhoto.projectId}`, formData, {
-                                    headers: { 'Content-Type': 'multipart/form-data' }
-                                });
-                                console.log(`📸 Sync Photo: Succès, suppression de IDB`);
-                                await db.deleteOfflinePhoto(item.payload.tempId);
-                            } else {
-                                console.warn(`⚠️ Sync Photo: Fichier introuvable dans IDB pour tempId ${item.payload.tempId}`);
-                            }
-                            break;
-                        case 'DELETE_PHOTO':
-                            await api.delete(`/photos/${item.payload.id}`);
-                            break;
-                    }
-                    console.log(`✅ ${item.type} OK`);
-                    successCount++;
-                } catch (error: any) {
-                    console.warn(`⏳ ${item.type} reporté`, error);
-                    if (!error.response || error.code === 'ECONNABORTED' || error.message === 'Network Error') {
-                        failedItems.push(item);
-                    } else {
-                        console.error(`❌ ${item.type} : erreur métier, abandon`, error);
-                    }
-                }
-            }
-
-            setQueue(failedItems);
-
-            if (successCount > 0) {
-                console.log("✨ Synchro réussie !");
-                await queryClient.invalidateQueries();
-            }
+            await syncService.syncAll();
+            await queryClient.invalidateQueries();
         } finally {
             setIsSyncing(false);
         }
-    }, [queue, queryClient, isSyncing]);
+    }, [isSyncing, queryClient]);
+
+    // Exposer les fonctions de debug
+    useEffect(() => {
+        (window as any).__hooked = {
+            logCache,
+            syncNow,
+            isOnline,
+            queueLength: queue.length
+        };
+    }, [logCache, syncNow, queue, isOnline]);
 
     return (
-        <SyncContext.Provider value={{ isOnline, queue, addToQueue, syncNow: processQueue, isSyncing }}>
+        <SyncContext.Provider value={{
+            isOnline,
+            queue,
+            addToQueue,
+            syncNow,
+            isSyncing,
+            logCache,
+            updateCacheOptimistically
+        }}>
             {children}
         </SyncContext.Provider>
     );

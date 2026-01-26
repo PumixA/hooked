@@ -1,16 +1,26 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Loader2, Save } from 'lucide-react';
-import { useMutation, useQueryClient } from '@tanstack/react-query'; // Import React Query
-import api from '../services/api';
+import { ArrowLeft, Loader2, Save, WifiOff } from 'lucide-react';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
-import { useSync } from '../context/SyncContext';
+import { useCreateMaterial } from '../hooks/useOfflineData';
 
 export default function MaterialCreate() {
     const navigate = useNavigate();
-    const queryClient = useQueryClient();
-    const { isOnline, addToQueue } = useSync();
+
+    // État de connexion
+    const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+    useEffect(() => {
+        const handleOnline = () => setIsOnline(true);
+        const handleOffline = () => setIsOnline(false);
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+        return () => {
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
+        };
+    }, []);
 
     const types = [
         { label: 'Crochets', value: 'hook' },
@@ -25,34 +35,18 @@ export default function MaterialCreate() {
         material_composition: ''
     });
 
-    // Utilisation de useMutation pour gérer l'ajout (et le mode hors-ligne si besoin)
-    const createMaterialMutation = useMutation({
-        mutationFn: async (newMaterial: any) => {
-            if (isOnline) {
-                await api.post('/materials', newMaterial);
-            } else {
-                // Mode hors-ligne : on ajoute à la file d'attente
-                addToQueue('CREATE_MATERIAL', newMaterial);
-                // On simule un succès pour l'UI
-                return Promise.resolve({ offline: true });
-            }
-        },
-        onSuccess: () => {
-            // Invalidation du cache pour forcer le rechargement de la liste
-            queryClient.invalidateQueries({ queryKey: ['materials'] });
-            navigate('/inventory');
-        },
-        onError: (error) => {
-            console.error("Erreur ajout matériel", error);
-            alert("Erreur : Impossible d'ajouter le matériel.");
-        }
-    });
+    // 🔥 OFFLINE-FIRST: Utilisation du hook local
+    const createMaterialMutation = useCreateMaterial();
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (!formData.name) return;
-        
-        createMaterialMutation.mutate(formData);
+
+        createMaterialMutation.mutate(formData, {
+            onSuccess: () => {
+                navigate('/inventory');
+            }
+        });
     };
 
     return (
@@ -64,6 +58,11 @@ export default function MaterialCreate() {
                     <ArrowLeft size={24} />
                 </button>
                 <h1 className="text-xl font-bold">Nouveau matériel</h1>
+                {!isOnline && (
+                    <span className="text-[10px] bg-orange-500/20 text-orange-400 px-2 py-1 rounded-full border border-orange-500/50 flex items-center gap-1 ml-auto">
+                        <WifiOff size={12} /> Hors ligne
+                    </span>
+                )}
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-6 max-w-md mx-auto">
@@ -121,7 +120,7 @@ export default function MaterialCreate() {
                         className="w-full flex items-center justify-center gap-2"
                     >
                         {createMaterialMutation.isPending ? <Loader2 className="animate-spin" /> : <Save size={20} />}
-                        <span>Ajouter au stock</span>
+                        <span>{isOnline ? 'Ajouter au stock' : 'Ajouter hors ligne'}</span>
                     </Button>
                 </div>
 

@@ -1,30 +1,29 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings, TrendingUp, ImagePlus, WifiOff, Trash2, CheckCircle, Flag, X, ChevronLeft, ChevronRight, Check } from 'lucide-react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import api from '../services/api';
+import { useQueryClient } from '@tanstack/react-query';
 import Timer from '../components/features/Timer';
 import Modal from '../components/ui/Modal';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
-import { useSafeMutation } from '../hooks/useSafeMutation';
-import { useSync } from '../context/SyncContext';
-import { db } from '../services/db'; // Import DB
-
-interface Project {
-    id: string;
-    title: string;
-    current_row: number;
-    goal_rows?: number;
-    total_duration?: number;
-    status?: string;
-}
+import {
+    useProject,
+    useUpdateProject,
+    useDeleteProject,
+    useNote,
+    useSaveNote,
+    useDeleteNote,
+    usePhotos,
+    useUploadPhoto,
+    useDeletePhoto,
+    useSaveSession
+} from '../hooks/useOfflineData';
 
 interface Photo {
     id: string;
-    file_path: string;
+    file_path?: string;
     created_at: string;
-    isOffline?: boolean;
+    _isLocal?: boolean;
     base64?: string;
 }
 
@@ -46,24 +45,35 @@ export default function ProjectDetail() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
     const queryClient = useQueryClient();
-    const { isOnline, addToQueue } = useSync();
 
-    const cachedProject = queryClient.getQueryData<Project[]>(['projects'])
-        ?.find((p) => p.id === id);
+    // État de connexion
+    const [isOnline, setIsOnline] = useState(navigator.onLine);
 
-    const { data: project, isLoading } = useQuery({
-        queryKey: ['projects', id],
-        queryFn: async () => {
-            const { data } = await api.get(`/projects/${id}`);
-            return data as Project;
-        },
-        initialData: cachedProject,
-        enabled: !!id && !String(id).startsWith('temp-'),
-        // 🔥 OFFLINE-FIRST : On utilise le cache si dispo
-        staleTime: 1000 * 60 * 5,
-        retry: false
-    });
+    useEffect(() => {
+        const handleOnline = () => setIsOnline(true);
+        const handleOffline = () => setIsOnline(false);
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+        return () => {
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
+        };
+    }, []);
 
+    // 🔥 OFFLINE-FIRST: Utilisation des hooks locaux
+    const { data: project, isLoading } = useProject(id);
+    const { data: noteData } = useNote(id);
+    const { data: photos = [] } = usePhotos(id);
+
+    const updateProjectMutation = useUpdateProject();
+    const deleteProjectMutation = useDeleteProject();
+    const saveNoteMutation = useSaveNote();
+    const deleteNoteMutation = useDeleteNote();
+    const uploadPhotoMutation = useUploadPhoto();
+    const deletePhotoMutation = useDeletePhoto();
+    const saveSessionMutation = useSaveSession();
+
+    // Timer state
     const [elapsed, setElapsed] = useState(0);
     const [isActive, setIsActive] = useState(false);
     const startTimeRef = useRef<number | null>(null);
@@ -84,19 +94,20 @@ export default function ProjectDetail() {
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [showFinishConfirm, setShowFinishConfirm] = useState(false);
     const [toastMessage, setToastMessage] = useState<string | null>(null);
-    
+
     const [selectedPhotoIndex, setSelectedPhotoIndex] = useState<number | null>(null);
     const [showGallery, setShowGallery] = useState(false);
     const [photoToDelete, setPhotoToDelete] = useState<Photo | null>(null);
-    
+
     const [isSelectionMode, setIsSelectionMode] = useState(false);
     const [selectedPhotoIds, setSelectedPhotoIds] = useState<Set<string>>(new Set());
     const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
-    const photoLongPressTimer = useRef<NodeJS.Timeout | null>(null);
+    const photoLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const [tempGoal, setTempGoal] = useState<string>('');
     const [tempTitle, setTempTitle] = useState<string>('');
     const [tempTimer, setTempTimer] = useState<string>('');
+    const [noteContent, setNoteContent] = useState('');
 
     useEffect(() => {
         if (project) {
@@ -114,229 +125,27 @@ export default function ProjectDetail() {
         }
     }, [showSettings, elapsed]);
 
-    const updateProjectMutation = useSafeMutation({
-        mutationFn: async (updates: any) => await api.patch(`/projects/${id}`, updates),
-        syncType: 'UPDATE_PROJECT',
-        queryKey: ['projects', id!],
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects'] })
-    });
-
-    const deleteProjectMutation = useSafeMutation({
-        mutationFn: async () => await api.delete(`/projects/${id}`),
-        syncType: 'DELETE_PROJECT',
-        queryKey: ['projects'],
-        onSuccess: () => {
-            navigate('/');
-        }
-    });
-
-    const saveSessionMutation = useSafeMutation({
-        mutationFn: async (sessionData: any) => await api.post('/sessions', sessionData),
-        syncType: 'SAVE_SESSION',
-        queryKey: ['sessions', id!]
-    });
-
-    const [noteContent, setNoteContent] = useState('');
-
-    const { data: notesData } = useQuery({
-        queryKey: ['notes', id],
-        queryFn: async () => {
-            if (!id || id.startsWith('temp-')) return null;
-            const { data } = await api.get(`/notes?project_id=${id}`);
-            return data;
-        },
-        enabled: showNotes && !!id && !id.startsWith('temp-'),
-        // 🔥 OFFLINE-FIRST : On utilise le cache si dispo
-        staleTime: 1000 * 60 * 5,
-        retry: false
-    });
-
     useEffect(() => {
-        if (notesData?.content) {
-            setNoteContent(notesData.content);
+        if (noteData?.content) {
+            setNoteContent(noteData.content);
         }
-    }, [notesData]);
-
-    const saveNoteMutation = useSafeMutation({
-        mutationFn: async () => {
-            if (!project) return;
-            await api.post('/notes', { project_id: project.id, content: noteContent });
-        },
-        syncType: 'ADD_NOTE',
-        queryKey: ['notes', id!],
-        onSuccess: () => setShowNotes(false)
-    });
-
-    const deleteNoteMutation = useSafeMutation({
-        mutationFn: async () => {
-            if (!project) return;
-            if (notesData?.id) {
-                await api.delete(`/notes/${notesData.id}`);
-            }
-        },
-        syncType: 'DELETE_NOTE',
-        queryKey: ['notes', id!],
-        onSuccess: () => {
-            setNoteContent('');
-            setShowNotes(false);
-            setToastMessage("Note supprimée");
-        }
-    });
+    }, [noteData]);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const fileToBase64 = (file: File): Promise<string> => {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
-            reader.onload = () => resolve(reader.result as string);
-            reader.onerror = error => reject(error);
-        });
-    };
-
-    const uploadPhotoMutation = useMutation({
-        mutationFn: async (files: FileList) => {
-            if (!project) throw new Error("Projet manquant");
-
-            if (!isOnline) {
-                console.log("📡 [Upload] Mode Hors-ligne détecté");
-                const newPhotos: Photo[] = [];
-                
-                for (let i = 0; i < files.length; i++) {
-                    const file = files[i];
-                    const tempId = `temp-photo-${Date.now()}-${i}`;
-                    const base64 = await fileToBase64(file);
-
-                    console.log(`💾 [Upload] Sauvegarde locale IDB: ${tempId}`);
-                    // 1. Sauvegarde physique dans IndexedDB
-                    await db.addOfflinePhoto(tempId, project.id, file);
-
-                    // 2. Ajout à la queue de synchro avec l'ID temporaire
-                    // Le SyncContext utilisera cet ID pour récupérer le fichier dans IDB
-                    addToQueue('UPLOAD_PHOTO', {
-                        tempId: tempId,
-                        project_id: project.id
-                    });
-
-                    newPhotos.push({
-                        id: tempId,
-                        file_path: '',
-                        created_at: new Date().toISOString(),
-                        isOffline: true,
-                        base64: base64
-                    });
-                }
-                return newPhotos;
-            }
-
-            const promises = Array.from(files).map(file => {
-                const formData = new FormData();
-                formData.append('file', file);
-                return api.post(`/photos?project_id=${project.id}`, formData, {
-                    headers: { 'Content-Type': 'multipart/form-data' }
-                });
-            });
-
-            return await Promise.all(promises);
-        },
-        onSuccess: (results: any) => {
-            if (!isOnline) {
-                queryClient.setQueryData(['photos', id], (old: Photo[] = []) => {
-                    return [...results, ...old];
-                });
-                setToastMessage(`${results.length} photo(s) sauvegardée(s) hors-ligne 💾`);
-            } else {
-                queryClient.invalidateQueries({ queryKey: ['photos'] });
-                setToastMessage(`${results.length} photo(s) ajoutée(s) ! 📸`);
-            }
-        },
-        onError: (err) => {
-            console.error("Erreur upload", err);
-            alert("Erreur lors de l'envoi.");
-        }
-    });
-
-    const deletePhotoMutation = useMutation({
-        mutationFn: async (photoId: string) => {
-            if (photoId.startsWith('temp-')) {
-                console.log(`🗑️ [Delete] Suppression photo locale: ${photoId}`);
-                await db.deleteOfflinePhoto(photoId);
-                // TODO: Retirer aussi de la queue si possible, mais complexe.
-                // Le SyncContext échouera silencieusement si IDB vide, c'est acceptable.
-                return;
-            }
-            await api.delete(`/photos/${photoId}`);
-        },
-        onSuccess: (_, photoId) => {
-            queryClient.setQueryData(['photos', id], (old: Photo[] = []) => old.filter(p => p.id !== photoId));
-
-            if (isOnline && !photoId.startsWith('temp-')) {
-                queryClient.invalidateQueries({ queryKey: ['photos'] });
-            }
-
-            setPhotoToDelete(null);
-            if (showGallery) {
-                if (photos.length <= 1) {
-                    setShowGallery(false);
-                } else {
-                    setSelectedPhotoIndex(prev => (prev && prev >= photos.length - 1 ? prev - 1 : prev));
-                }
-            }
-            setToastMessage("Photo supprimée");
-        }
-    });
-
-    const deleteMultiplePhotosMutation = useMutation({
-        mutationFn: async (ids: string[]) => {
-            const realIds = ids.filter(id => !id.startsWith('temp-'));
-            const tempIds = ids.filter(id => id.startsWith('temp-'));
-
-            // Supprimer les locales
-            for (const tempId of tempIds) {
-                await db.deleteOfflinePhoto(tempId);
-            }
-
-            // Supprimer les distantes
-            if (realIds.length > 0) {
-                const promises = realIds.map(id => api.delete(`/photos/${id}`));
-                return await Promise.all(promises);
-            }
-        },
-        onSuccess: (results, ids) => {
-            queryClient.setQueryData(['photos', id], (old: Photo[] = []) => old.filter(p => !ids.includes(p.id)));
-
-            if (isOnline) {
-                queryClient.invalidateQueries({ queryKey: ['photos'] });
-            }
-
-            setShowBulkDeleteConfirm(false);
-            setIsSelectionMode(false);
-            setSelectedPhotoIds(new Set());
-            setToastMessage(`${ids.length} photos supprimées`);
-        },
-        onError: () => alert("Erreur lors de la suppression multiple.")
-    });
-
     const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
         const files = event.target.files;
-        if (files && files.length > 0) uploadPhotoMutation.mutate(files);
+        if (files && files.length > 0 && id) {
+            Array.from(files).forEach(file => {
+                uploadPhotoMutation.mutate(
+                    { project_id: id, file },
+                    {
+                        onSuccess: () => setToastMessage('Photo ajoutée !')
+                    }
+                );
+            });
+        }
     };
-
-    const { data: photos = [] } = useQuery({
-        queryKey: ['photos', id],
-        queryFn: async () => {
-            if (!id || id.startsWith('temp-')) return [];
-            try {
-                const { data } = await api.get(`/photos?project_id=${id}`);
-                return data as Photo[];
-            } catch (e) {
-                return [];
-            }
-        },
-        enabled: !!id && !id.startsWith('temp-'), // 🔥 OFFLINE-FIRST : On fetch même si offline (pour le cache)
-        staleTime: 1000 * 60 * 5,
-        retry: false
-    });
 
     const openGallery = (index: number) => {
         if (isSelectionMode) return;
@@ -389,18 +198,21 @@ export default function ProjectDetail() {
         }
     };
 
+    // Timer logic
     useEffect(() => {
-        let interval: any = null;
+        let interval: ReturnType<typeof setInterval> | null = null;
         if (isActive) {
             interval = setInterval(() => {
                 const now = Date.now();
                 const currentSessionDuration = Math.floor((now - (startTimeRef.current || now)) / 1000);
                 setElapsed(savedTimeRef.current + currentSessionDuration);
             }, 1000);
-        } else {
+        } else if (interval) {
             clearInterval(interval);
         }
-        return () => clearInterval(interval);
+        return () => {
+            if (interval) clearInterval(interval);
+        };
     }, [isActive]);
 
     const handleToggleTimer = () => {
@@ -411,9 +223,9 @@ export default function ProjectDetail() {
             const start = startTimeRef.current || now;
             const duration = Math.floor((now - start) / 1000);
 
-            if (duration > 2 && project) {
+            if (duration > 2 && project && id) {
                 saveSessionMutation.mutate({
-                    project_id: project.id,
+                    project_id: id,
                     start_time: new Date(start).toISOString(),
                     end_time: new Date(now).toISOString(),
                     duration_seconds: duration
@@ -421,9 +233,9 @@ export default function ProjectDetail() {
             }
             savedTimeRef.current = elapsed;
 
-            if (project) {
+            if (project && id) {
                 updateProjectMutation.mutate({
-                    id: project.id,
+                    id,
                     total_duration: elapsed
                 });
             }
@@ -447,9 +259,9 @@ export default function ProjectDetail() {
         startTimeRef.current = null;
         setSessionStartRow(null);
 
-        if (project) {
+        if (project && id) {
             updateProjectMutation.mutate({
-                id: project.id,
+                id,
                 total_duration: 0
             });
         }
@@ -473,14 +285,14 @@ export default function ProjectDetail() {
     };
 
     const updateCounter = (increment: number) => {
-        if (!project || project.status === 'completed') return;
+        if (!project || !id || project.status === 'completed') return;
 
         const amount = increment * step;
         const currentRow = project.current_row || 0;
         const newCount = Math.max(0, currentRow + amount);
 
         let updates: any = {
-            id: project.id,
+            id,
             current_row: newCount
         };
 
@@ -492,7 +304,8 @@ export default function ProjectDetail() {
             }
         }
 
-        queryClient.setQueryData(['projects', id], (old: Project) => ({
+        // Mise à jour optimiste locale
+        queryClient.setQueryData(['projects', id], (old: any) => ({
             ...old,
             ...updates
         }));
@@ -501,8 +314,8 @@ export default function ProjectDetail() {
     };
 
     const handleSaveSettings = () => {
-        if (!project) return;
-        const newGoal = tempGoal ? parseInt(tempGoal) : null;
+        if (!project || !id) return;
+        const newGoal = tempGoal ? parseInt(tempGoal) : undefined;
 
         const [h, m, s] = tempTimer.split(':').map(Number);
         let newElapsed = elapsed;
@@ -515,7 +328,7 @@ export default function ProjectDetail() {
         }
 
         updateProjectMutation.mutate({
-            id: project.id,
+            id,
             title: tempTitle,
             goal_rows: newGoal,
             total_duration: newElapsed
@@ -524,21 +337,76 @@ export default function ProjectDetail() {
     };
 
     const handleDeleteProject = () => {
-        if (!project) return;
-        deleteProjectMutation.mutate({ id: project.id });
+        if (!project || !id) return;
+        deleteProjectMutation.mutate(id, {
+            onSuccess: () => navigate('/')
+        });
     };
 
     const handleFinishProject = () => {
-        if (!project) return;
+        if (!project || !id) return;
 
         if (isActive) handleToggleTimer();
 
         updateProjectMutation.mutate({
-            id: project.id,
+            id,
             status: 'completed',
             end_date: new Date().toISOString()
         });
         setShowFinishConfirm(false);
+    };
+
+    const handleSaveNote = () => {
+        if (!id) return;
+        saveNoteMutation.mutate(
+            { project_id: id, content: noteContent },
+            { onSuccess: () => setShowNotes(false) }
+        );
+    };
+
+    const handleDeleteNote = () => {
+        if (!noteData?.id || !id) return;
+        deleteNoteMutation.mutate(
+            { id: noteData.id, project_id: id },
+            {
+                onSuccess: () => {
+                    setNoteContent('');
+                    setShowNotes(false);
+                    setToastMessage("Note supprimée");
+                }
+            }
+        );
+    };
+
+    const handleDeletePhoto = (photoId: string) => {
+        if (!id) return;
+        deletePhotoMutation.mutate(
+            { id: photoId, project_id: id },
+            {
+                onSuccess: () => {
+                    setPhotoToDelete(null);
+                    if (showGallery) {
+                        if (photos.length <= 1) {
+                            setShowGallery(false);
+                        } else {
+                            setSelectedPhotoIndex(prev => (prev && prev >= photos.length - 1 ? prev - 1 : prev));
+                        }
+                    }
+                    setToastMessage("Photo supprimée");
+                }
+            }
+        );
+    };
+
+    const handleBulkDeletePhotos = () => {
+        if (!id) return;
+        selectedPhotoIds.forEach(photoId => {
+            deletePhotoMutation.mutate({ id: photoId, project_id: id });
+        });
+        setShowBulkDeleteConfirm(false);
+        setIsSelectionMode(false);
+        setSelectedPhotoIds(new Set());
+        setToastMessage(`${selectedPhotoIds.size} photos supprimées`);
     };
 
     if (isLoading && !project) {
@@ -554,9 +422,10 @@ export default function ProjectDetail() {
     }
 
     const estimation = getEstimation();
-    const isOfflineProject = id?.startsWith('temp-');
+    const isOfflineProject = id?.startsWith('local-');
     const isCompleted = project.status === 'completed';
     const currentRowDisplay = project.current_row || 0;
+    const API_URL = 'http://192.168.1.96:3000';
 
     return (
         <div className="h-[100dvh] w-screen bg-background text-white flex flex-col animate-fade-in overflow-hidden">
@@ -575,7 +444,7 @@ export default function ProjectDetail() {
                 </h1>
 
                 <div className="w-12 flex justify-end gap-2">
-                    {isOfflineProject && (
+                    {(isOfflineProject || !isOnline || project._syncStatus === 'pending') && (
                         <span className="text-[10px] bg-orange-500/20 text-orange-400 px-1 py-1 rounded-full border border-orange-500/50 flex items-center gap-1">
                             <WifiOff size={10} />
                         </span>
@@ -658,13 +527,10 @@ export default function ProjectDetail() {
                 </div>
             </div>
 
+            {/* MODALS */}
             <Modal isOpen={showSettings} onClose={() => setShowSettings(false)} title="Réglages du projet">
                 <div className="space-y-6">
-                    <Input
-                        label="Nom du projet"
-                        value={tempTitle}
-                        onChange={(e) => setTempTitle(e.target.value)}
-                    />
+                    <Input label="Nom du projet" value={tempTitle} onChange={(e) => setTempTitle(e.target.value)} />
 
                     <div className="space-y-2">
                         <label className="text-xs text-zinc-400 ml-1">Pas d'incrémentation</label>
@@ -675,28 +541,12 @@ export default function ProjectDetail() {
                         </div>
                     </div>
 
-                    <Input
-                        label="Objectif de rangs"
-                        type="number"
-                        value={tempGoal}
-                        onChange={(e) => setTempGoal(e.target.value)}
-                        placeholder="Infini"
-                    />
-
-                    <Input
-                        label="Temps écoulé (HH:MM:SS)"
-                        value={tempTimer}
-                        onChange={(e) => setTempTimer(e.target.value)}
-                        placeholder="00:00:00"
-                    />
+                    <Input label="Objectif de rangs" type="number" value={tempGoal} onChange={(e) => setTempGoal(e.target.value)} placeholder="Infini" />
+                    <Input label="Temps écoulé (HH:MM:SS)" value={tempTimer} onChange={(e) => setTempTimer(e.target.value)} placeholder="00:00:00" />
 
                     <div className="pt-4 space-y-3">
                         <Button onClick={handleSaveSettings}>Enregistrer</Button>
-
-                        <button
-                            onClick={() => { setShowSettings(false); setShowDeleteConfirm(true); }}
-                            className="w-full py-3 text-red-400 hover:bg-red-500/10 rounded-xl transition flex items-center justify-center gap-2"
-                        >
+                        <button onClick={() => { setShowSettings(false); setShowDeleteConfirm(true); }} className="w-full py-3 text-red-400 hover:bg-red-500/10 rounded-xl transition flex items-center justify-center gap-2">
                             <Trash2 size={18} /> Supprimer le projet
                         </button>
                     </div>
@@ -712,6 +562,7 @@ export default function ProjectDetail() {
                     </div>
                 </div>
             </Modal>
+
             <Modal isOpen={showDeleteConfirm} onClose={() => setShowDeleteConfirm(false)} title="Supprimer ?">
                 <div className="space-y-4 text-center">
                     <p className="text-zinc-400">Voulez-vous vraiment supprimer ce projet ?<br/>Cette action est irréversible.</p>
@@ -731,10 +582,12 @@ export default function ProjectDetail() {
                         onChange={(e) => setNoteContent(e.target.value)}
                     />
                     <div className="flex justify-between shrink-0 gap-3">
-                        {notesData?.id && (
-                            <button onClick={() => deleteNoteMutation.mutate()} className="p-3 rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500/20 transition"><Trash2 size={20} /></button>
+                        {noteData?.id && (
+                            <button onClick={handleDeleteNote} className="p-3 rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500/20 transition">
+                                <Trash2 size={20} />
+                            </button>
                         )}
-                        <Button onClick={() => saveNoteMutation.mutate()} isLoading={saveNoteMutation.isPending} className="flex-1">Sauvegarder</Button>
+                        <Button onClick={handleSaveNote} isLoading={saveNoteMutation.isPending} className="flex-1">Sauvegarder</Button>
                     </div>
                 </div>
             </Modal>
@@ -766,17 +619,14 @@ export default function ProjectDetail() {
                 <div className="grid grid-cols-2 gap-3 max-h-[40vh] overflow-y-auto pr-1 scrollbar-hide select-none">
                     {photos.map((photo: Photo, index: number) => {
                         const isSelected = selectedPhotoIds.has(photo.id);
-                        const imgSrc = photo.isOffline && photo.base64 ? photo.base64 : `http://192.168.1.96:3000${photo.file_path}`;
+                        const imgSrc = photo._isLocal && photo.base64 ? photo.base64 : `${API_URL}${photo.file_path}`;
                         return (
                             <div
                                 key={photo.id}
                                 onPointerDown={() => handlePhotoPointerDown(photo.id)}
                                 onPointerUp={handlePhotoPointerUp}
                                 onClick={() => handlePhotoClick(index, photo.id)}
-                                className={`
-                                    relative aspect-square rounded-lg overflow-hidden group cursor-pointer active:scale-95 transition-all
-                                    ${isSelected ? 'ring-4 ring-primary scale-95' : 'bg-zinc-800'}
-                                `}
+                                className={`relative aspect-square rounded-lg overflow-hidden group cursor-pointer active:scale-95 transition-all ${isSelected ? 'ring-4 ring-primary scale-95' : 'bg-zinc-800'}`}
                             >
                                 <img src={imgSrc} alt="Projet" className="w-full h-full object-cover" />
                                 {isSelected && (
@@ -784,7 +634,7 @@ export default function ProjectDetail() {
                                         <div className="bg-primary text-white rounded-full p-1"><Check size={24} strokeWidth={3} /></div>
                                     </div>
                                 )}
-                                {photo.isOffline && (
+                                {photo._isLocal && (
                                     <div className="absolute bottom-1 right-1 bg-orange-500/80 text-white text-[10px] px-1.5 py-0.5 rounded-full flex items-center gap-1">
                                         <WifiOff size={8} /> Local
                                     </div>
@@ -806,7 +656,7 @@ export default function ProjectDetail() {
                     <div className="flex-1 flex items-center justify-center relative overflow-hidden">
                         <div className="absolute inset-y-0 left-0 w-1/4 z-10" onClick={prevPhoto} />
                         <img
-                            src={photos[selectedPhotoIndex].isOffline && photos[selectedPhotoIndex].base64 ? photos[selectedPhotoIndex].base64 : `http://192.168.1.96:3000${photos[selectedPhotoIndex].file_path}`}
+                            src={photos[selectedPhotoIndex]._isLocal && photos[selectedPhotoIndex].base64 ? photos[selectedPhotoIndex].base64 : `${API_URL}${photos[selectedPhotoIndex].file_path}`}
                             alt="Galerie"
                             className="max-w-full max-h-full object-contain"
                         />
@@ -817,21 +667,23 @@ export default function ProjectDetail() {
                     </div>
                 </div>
             )}
+
             <Modal isOpen={!!photoToDelete} onClose={() => setPhotoToDelete(null)} title="Supprimer la photo ?" zIndex={200}>
                 <div className="space-y-4 text-center">
                     <p className="text-zinc-400">Cette photo sera définitivement supprimée.</p>
                     <div className="flex gap-3 mt-6">
                         <Button variant="secondary" onClick={() => setPhotoToDelete(null)} className="flex-1">Annuler</Button>
-                        <Button variant="danger" onClick={() => photoToDelete && deletePhotoMutation.mutate(photoToDelete.id)} className="flex-1">Supprimer</Button>
+                        <Button variant="danger" onClick={() => photoToDelete && handleDeletePhoto(photoToDelete.id)} className="flex-1">Supprimer</Button>
                     </div>
                 </div>
             </Modal>
+
             <Modal isOpen={showBulkDeleteConfirm} onClose={() => setShowBulkDeleteConfirm(false)} title="Supprimer la sélection ?" zIndex={200}>
                 <div className="space-y-4 text-center">
                     <p className="text-zinc-400">Vous allez supprimer <strong>{selectedPhotoIds.size}</strong> photo(s).<br/>Cette action est irréversible.</p>
                     <div className="flex gap-3 mt-6">
                         <Button variant="secondary" onClick={() => setShowBulkDeleteConfirm(false)} className="flex-1">Annuler</Button>
-                        <Button variant="danger" onClick={() => deleteMultiplePhotosMutation.mutate(Array.from(selectedPhotoIds))} className="flex-1">Supprimer tout</Button>
+                        <Button variant="danger" onClick={handleBulkDeletePhotos} className="flex-1">Supprimer tout</Button>
                     </div>
                 </div>
             </Modal>

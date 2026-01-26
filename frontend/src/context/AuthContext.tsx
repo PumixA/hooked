@@ -1,96 +1,121 @@
-import { createContext, useState, useEffect, useContext, type ReactNode } from 'react';
-// CORRECTION : On retire le ".ts" à la fin
-import api from '../services/api';
+/**
+ * AuthContext - Gestion de l'authentification OPTIONNELLE
+ *
+ * L'authentification sert uniquement à:
+ * - Connecter un compte pour activer la synchronisation cloud
+ * - Sauvegarder les données sur le serveur
+ *
+ * L'application fonctionne parfaitement sans authentification!
+ */
 
-// 1. Définition des types
-interface User {
-    id: string;
-    email: string;
-    theme_pref?: string;
-    role?: string;
-}
+import { createContext, useState, useContext, type ReactNode } from 'react';
+import api from '../services/api';
+import { useApp, type ConnectedAccount } from './AppContext';
 
 interface AuthContextType {
-    user: User | null;
-    login: (email: string, password: string) => Promise<any>;
-    register: (email: string, password: string) => Promise<any>;
+    // Actions d'authentification
+    login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+    register: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
     logout: () => void;
-    loading: boolean;
+
+    // État
+    isAuthenticating: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-// 2. Le Provider
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-    const [user, setUser] = useState<User | null>(() => {
-        // Initialisation optimiste : on regarde d'abord dans le localStorage
-        const storedUser = localStorage.getItem('user');
-        return storedUser ? JSON.parse(storedUser) : null;
-    });
-    const [loading, setLoading] = useState(true);
+    const { setAccount, updateSettings } = useApp();
+    const [isAuthenticating, setIsAuthenticating] = useState(false);
 
-    useEffect(() => {
-        const checkUserLoggedIn = async () => {
-            const token = localStorage.getItem('token');
+    const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
+        setIsAuthenticating(true);
 
-            if (token) {
-                try {
-                    const { data } = await api.get('/users/me');
-                    setUser(data);
-                    // Mise à jour du cache utilisateur local
-                    localStorage.setItem('user', JSON.stringify(data));
-                } catch (error: any) {
-                    // Si c'est une erreur réseau (pas de réponse), on garde l'utilisateur connecté (optimiste)
-                    if (!error.response) {
-                        console.warn("Impossible de vérifier la session (Hors-ligne). On garde la session locale.");
-                        // On ne fait rien, user est déjà initialisé via le useState
-                    } else if (error.response?.status === 401) {
-                        // Vraie erreur d'auth -> on déconnecte
-                        console.error("Session invalide", error);
-                        localStorage.removeItem('token');
-                        localStorage.removeItem('user');
-                        setUser(null);
-                    }
-                }
-            } else {
-                // Pas de token, on nettoie tout
-                localStorage.removeItem('user');
-                setUser(null);
+        try {
+            const { data } = await api.post('/auth/login', { email, password });
+
+            // Stocker le token pour les futures requêtes API
+            localStorage.setItem('token', data.token);
+
+            // Mettre à jour le compte connecté dans AppContext
+            const account: ConnectedAccount = {
+                id: data.user.id,
+                email: data.user.email,
+            };
+            setAccount(account);
+
+            // Activer automatiquement la sync après connexion
+            updateSettings({ syncEnabled: true });
+
+            console.log('✅ [Auth] Connexion réussie:', email);
+            return { success: true };
+        } catch (error: any) {
+            console.error('❌ [Auth] Erreur de connexion:', error);
+
+            let errorMessage = 'Erreur de connexion';
+            if (error.response?.status === 401) {
+                errorMessage = 'Email ou mot de passe incorrect';
+            } else if (!error.response) {
+                errorMessage = 'Impossible de joindre le serveur. Vérifiez votre connexion.';
             }
-            setLoading(false);
-        };
 
-        checkUserLoggedIn();
-    }, []);
-
-    const login = async (email: string, password: string) => {
-        const { data } = await api.post('/auth/login', { email, password });
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('user', JSON.stringify(data.user)); // Sauvegarde pour le mode hors-ligne
-        setUser(data.user);
-        return data;
+            return { success: false, error: errorMessage };
+        } finally {
+            setIsAuthenticating(false);
+        }
     };
 
-    const register = async (email: string, password: string) => {
-        const { data } = await api.post('/auth/register', { email, password });
-        // Optionnel : connecter automatiquement après inscription
-        return data;
+    const register = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
+        setIsAuthenticating(true);
+
+        try {
+            const { data } = await api.post('/auth/register', { email, password });
+
+            // Connecter automatiquement après inscription
+            localStorage.setItem('token', data.token);
+
+            const account: ConnectedAccount = {
+                id: data.user.id,
+                email: data.user.email,
+            };
+            setAccount(account);
+            updateSettings({ syncEnabled: true });
+
+            console.log('✅ [Auth] Inscription réussie:', email);
+            return { success: true };
+        } catch (error: any) {
+            console.error('❌ [Auth] Erreur d\'inscription:', error);
+
+            let errorMessage = 'Erreur d\'inscription';
+            if (error.response?.status === 409) {
+                errorMessage = 'Cet email est déjà utilisé';
+            } else if (!error.response) {
+                errorMessage = 'Impossible de joindre le serveur';
+            }
+
+            return { success: false, error: errorMessage };
+        } finally {
+            setIsAuthenticating(false);
+        }
     };
 
     const logout = () => {
+        // Supprimer le token
         localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        setUser(null);
+
+        // Déconnecter le compte (désactive aussi la sync via AppContext)
+        setAccount(null);
+
+        console.log('👋 [Auth] Déconnexion');
     };
 
     return (
-        <AuthContext.Provider value={{ user, login, register, logout, loading }}>
+        <AuthContext.Provider value={{ login, register, logout, isAuthenticating }}>
             {children}
         </AuthContext.Provider>
     );
 };
 
-// 3. Le Hook personnalisé
 export const useAuth = () => {
     const context = useContext(AuthContext);
     if (!context) {

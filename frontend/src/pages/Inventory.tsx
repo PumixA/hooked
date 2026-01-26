@@ -1,12 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, X, Loader2, PackageOpen, WifiOff, Trash2 } from 'lucide-react';
-import api from '../services/api';
+import { Plus, Loader2, PackageOpen, WifiOff, Trash2 } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Modal from '../components/ui/Modal';
 import Button from '../components/ui/Button';
-import { useSync } from '../context/SyncContext';
+import { useMaterials, useDeleteMaterial } from '../hooks/useOfflineData';
 
 interface Material {
     id: string;
@@ -14,58 +12,31 @@ interface Material {
     name: string;
     brand?: string;
     material_composition?: string;
+    _syncStatus?: string;
 }
 
 export default function Inventory() {
     const navigate = useNavigate();
-    const queryClient = useQueryClient();
-    const { isOnline, addToQueue } = useSync();
     const [filter, setFilter] = useState<string>('all');
-    
-    // État pour la modale de suppression
     const [itemToDelete, setItemToDelete] = useState<Material | null>(null);
 
-    // 1. Récupération avec useQuery
-    const { data: materials = [], isLoading, isError } = useQuery({
-        queryKey: ['materials'],
-        queryFn: async () => {
-            const { data } = await api.get('/materials');
-            return data as Material[];
-        },
-        // 🔥 OFFLINE-FIRST : On utilise le cache si dispo, même si stale
-        staleTime: 1000 * 60 * 5, 
-        retry: false
-    });
+    // État de connexion
+    const [isOnline, setIsOnline] = useState(navigator.onLine);
 
-    // 2. Mutation de suppression
-    const deleteMutation = useMutation({
-        mutationFn: async (id: string) => {
-            if (isOnline) {
-                await api.delete(`/materials/${id}`);
-            } else {
-                addToQueue('DELETE_MATERIAL', { id });
-            }
-        },
-        onMutate: async (id) => {
-            // Optimistic Update
-            await queryClient.cancelQueries({ queryKey: ['materials'] });
-            const previousMaterials = queryClient.getQueryData<Material[]>(['materials']);
-            
-            queryClient.setQueryData<Material[]>(['materials'], (old) => 
-                old ? old.filter(m => m.id !== id) : []
-            );
-            
-            return { previousMaterials };
-        },
-        onError: (err, id, context) => {
-            queryClient.setQueryData(['materials'], context?.previousMaterials);
-            alert("Erreur lors de la suppression.");
-        },
-        onSettled: () => {
-            queryClient.invalidateQueries({ queryKey: ['materials'] });
-            setItemToDelete(null);
-        }
-    });
+    useEffect(() => {
+        const handleOnline = () => setIsOnline(true);
+        const handleOffline = () => setIsOnline(false);
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+        return () => {
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
+        };
+    }, []);
+
+    // 🔥 OFFLINE-FIRST: Utilisation des hooks locaux
+    const { data: materials = [], isLoading, isError } = useMaterials();
+    const deleteMutation = useDeleteMaterial();
 
     const handleDeleteClick = (e: React.MouseEvent, item: Material) => {
         e.stopPropagation();
@@ -74,7 +45,9 @@ export default function Inventory() {
 
     const confirmDelete = () => {
         if (itemToDelete) {
-            deleteMutation.mutate(itemToDelete.id);
+            deleteMutation.mutate(itemToDelete.id, {
+                onSuccess: () => setItemToDelete(null)
+            });
         }
     };
 
@@ -82,6 +55,9 @@ export default function Inventory() {
     const filteredMaterials = materials.filter(m =>
         filter === 'all' ? true : m.category_type === filter
     );
+
+    // Compter les éléments en attente de sync
+    const pendingCount = materials.filter(m => m._syncStatus === 'pending').length;
 
     // Helpers UI
     const getCategoryLabel = (type: string) => {
@@ -139,6 +115,18 @@ export default function Inventory() {
             {/* Header */}
             <div className="flex justify-between items-center mb-6">
                 <h1 className="text-2xl font-bold">Inventaire</h1>
+                <div className="flex items-center gap-2">
+                    {!isOnline && (
+                        <span className="text-[10px] bg-orange-500/20 text-orange-400 px-2 py-1 rounded-full border border-orange-500/50 flex items-center gap-1">
+                            <WifiOff size={12} /> Hors ligne
+                        </span>
+                    )}
+                    {pendingCount > 0 && (
+                        <span className="text-[10px] bg-yellow-500/20 text-yellow-400 px-2 py-1 rounded-full">
+                            {pendingCount} en attente
+                        </span>
+                    )}
+                </div>
             </div>
 
             {/* Filtres */}
@@ -173,11 +161,15 @@ export default function Inventory() {
                     </div>
                 ) : (
                     filteredMaterials.map((item) => (
-                        <Card 
-                            key={item.id} 
+                        <Card
+                            key={item.id}
                             onClick={() => navigate(`/inventory/${item.id}`)}
-                            className="flex items-center justify-between p-4 group bg-secondary border-zinc-800 cursor-pointer active:scale-[0.98] transition-transform"
+                            className="flex items-center justify-between p-4 group bg-secondary border-zinc-800 cursor-pointer active:scale-[0.98] transition-transform relative"
                         >
+                            {/* Indicateur de sync */}
+                            {item._syncStatus === 'pending' && (
+                                <div className="absolute top-2 right-2 w-2 h-2 bg-yellow-400 rounded-full" title="Non synchronisé" />
+                            )}
                             <div className="flex items-center gap-4">
                                 <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl bg-zinc-800`}>
                                     {getIcon(item.category_type)}

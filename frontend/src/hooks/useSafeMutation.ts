@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSync, type SyncActionType } from '../context/SyncContext';
+import { logCacheStore } from '../services/cacheLogger';
 
 interface SafeMutationOptions<TData, TVariables> {
     mutationFn: (variables: TVariables) => Promise<TData>;
@@ -25,6 +26,10 @@ export function useSafeMutation<TData = any, TVariables = any>({
             if (!isOnline) {
                 console.log(`📡 [useSafeMutation] Hors-ligne détecté. Ajout à la queue : ${syncType}`);
                 addToQueue(syncType, variables);
+                // Log la mutation offline
+                if (queryKey) {
+                    logCacheStore(queryKey, variables, 'offline-mutation');
+                }
                 // On retourne une fausse promesse résolue pour ne pas déclencher onError
                 return Promise.resolve({ offline: true } as any);
             }
@@ -48,6 +53,10 @@ export function useSafeMutation<TData = any, TVariables = any>({
                 if (isNetworkError) {
                     console.warn(`📡 [useSafeMutation] Erreur réseau détectée. Fallback vers Queue.`);
                     addToQueue(syncType, variables);
+                    // Log la mutation offline (fallback réseau)
+                    if (queryKey) {
+                        logCacheStore(queryKey, variables, 'offline-mutation');
+                    }
                     return Promise.resolve({ offline: true } as any);
                 }
 
@@ -56,7 +65,7 @@ export function useSafeMutation<TData = any, TVariables = any>({
                 throw error;
             }
         },
-        onSuccess: (data, variables, context) => {
+        onSuccess: (data, variables, _context) => {
             // Si c'était une action offline
             if (data && (data as any).offline) {
                 if (onSuccess) onSuccess(data, variables);
@@ -69,11 +78,11 @@ export function useSafeMutation<TData = any, TVariables = any>({
             }
             if (onSuccess) onSuccess(data, variables);
         },
-        onError: (error, variables, context) => {
+        onError: (error, _variables, _context) => {
             console.error(`💥 [useSafeMutation] onError:`, error);
             if (onError) onError(error);
         },
-        onSettled: (data, error) => {
+        onSettled: (_data, _error) => {
             // Logs de debug optionnels
             // console.log(`🏁 [useSafeMutation] onSettled`);
         }

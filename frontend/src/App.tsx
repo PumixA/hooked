@@ -7,44 +7,40 @@ import Settings from './pages/Settings';
 import ProjectCreate from './pages/ProjectCreate';
 import ProjectDetail from './pages/ProjectDetail';
 import MaterialCreate from './pages/MaterialCreate';
-import MaterialEdit from './pages/MaterialEdit'; // Import de la nouvelle page
-import { useAuth } from './context/AuthContext';
-import type { JSX } from 'react';
+import MaterialEdit from './pages/MaterialEdit';
 
-// Petit wrapper pour empêcher d'aller sur Login si on est déjà connecté
-const PublicRoute = ({ children }: { children: JSX.Element }) => {
-    const { user } = useAuth();
-    if (user) return <Navigate to="/" replace />;
-    return children;
-};
-
+/**
+ * App - Routing principal
+ *
+ * Architecture Offline-First:
+ * - Toutes les routes sont accessibles sans authentification
+ * - La page login est accessible depuis les parametres pour activer la sync cloud
+ * - L'application fonctionne 100% en local par defaut
+ */
 function App() {
     return (
         <Routes>
-            {/* Route Publique (Login) */}
-            <Route path="/login" element={
-                <PublicRoute>
-                    <Login />
-                </PublicRoute>
-            } />
-
-            {/* Routes Privées (Protégées par le Layout) */}
+            {/* Routes principales - Accessibles a tous */}
             <Route element={<AppLayout />}>
                 <Route path="/" element={<Dashboard />} />
 
                 {/* INVENTAIRE */}
                 <Route path="/inventory" element={<Inventory />} />
                 <Route path="/inventory/new" element={<MaterialCreate />} />
-                <Route path="/inventory/:id" element={<MaterialEdit />} /> {/* Nouvelle route */}
+                <Route path="/inventory/:id" element={<MaterialEdit />} />
 
+                {/* PARAMETRES */}
                 <Route path="/settings" element={<Settings />} />
 
                 {/* PROJETS */}
                 <Route path="/projects/new" element={<ProjectCreate />} />
                 <Route path="/projects/:id" element={<ProjectDetail />} />
+
+                {/* PAGE DE CONNEXION - Accessible depuis parametres */}
+                <Route path="/login" element={<Login />} />
             </Route>
 
-            {/* Redirection par défaut */}
+            {/* Redirection par defaut vers le dashboard */}
             <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
     );

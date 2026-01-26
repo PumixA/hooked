@@ -1,15 +1,12 @@
 import { useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Settings, Plus, Loader2, Clock, WifiOff, Package, Cloud, RefreshCw, Trash2, Edit2, CheckCircle } from 'lucide-react';
-import api from '../services/api';
+import { Settings, Plus, Loader2, Clock, WifiOff, Package, Trash2, Edit2, CheckCircle } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Navbar from '../components/BottomNavBar';
-import { useSync } from '../context/SyncContext';
 import { useState, useRef, useEffect } from 'react';
 import Modal from '../components/ui/Modal';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
-import { useSafeMutation } from '../hooks/useSafeMutation';
+import { useProjects, useUpdateProject, useDeleteProject, useWeeklyTime, useSync } from '../hooks/useOfflineData';
 
 interface Project {
     id: string;
@@ -18,13 +15,13 @@ interface Project {
     goal_rows?: number;
     updated_at: string;
     status: string;
+    _syncStatus?: string;
+    _isLocal?: boolean;
 }
 
 export default function Dashboard() {
     const navigate = useNavigate();
-    const { queue, isOnline, syncNow } = useSync();
     const [isRefreshing, setIsRefreshing] = useState(false);
-    const queryClient = useQueryClient();
 
     // --- ÉTATS POUR LE MENU CONTEXTUEL ---
     const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -34,31 +31,29 @@ export default function Dashboard() {
     const [newTitle, setNewTitle] = useState('');
     const [longPressTriggered, setLongPressTriggered] = useState(false);
 
-    const longPressTimer = useRef<NodeJS.Timeout | null>(null);
+    const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const pressStartTime = useRef<number>(0);
 
-    // 1. Requête PROJETS
-    const { data, isLoading: isProjectsLoading, isError, refetch } = useQuery({
-        queryKey: ['projects'],
-        queryFn: async () => {
-            const response = await api.get('/projects');
-            return response.data as Project[];
-        },
-        retry: false,
-        staleTime: 1000 * 60 * 5,
-    });
+    // 🔥 OFFLINE-FIRST: Utilisation des hooks locaux
+    const { data: projects = [], isLoading: isProjectsLoading, isError, refetch } = useProjects();
+    const { data: weeklyTimeData, isLoading: isWeeklyLoading, refetch: refetchWeekly } = useWeeklyTime();
+    const updateProjectMutation = useUpdateProject();
+    const deleteProjectMutation = useDeleteProject();
+    const syncMutation = useSync();
 
-    // 2. Requête TEMPS HEBDOMADAIRE
-    const { data: weeklyTimeData, isLoading: isWeeklyLoading, refetch: refetchWeekly } = useQuery({
-        queryKey: ['weeklyTime'],
-        queryFn: async () => {
-            const response = await api.get('/sessions/weekly');
-            return response.data as { totalSeconds: number };
-        },
-        retry: false,
-        refetchOnMount: 'always',
-        staleTime: 0,
-    });
+    // État de connexion
+    const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+    useEffect(() => {
+        const handleOnline = () => setIsOnline(true);
+        const handleOffline = () => setIsOnline(false);
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+        return () => {
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
+        };
+    }, []);
 
     useEffect(() => {
         const onFocus = () => { refetchWeekly(); refetch(); };
@@ -74,49 +69,39 @@ export default function Dashboard() {
         return `${hours}h ${minutes.toString().padStart(2, '0')}m`;
     };
 
-    // --- MUTATIONS ---
-    const renameMutation = useSafeMutation({
-        mutationFn: async ({ id, title }: { id: string, title: string }) => {
-            await api.patch(`/projects/${id}`, { title });
-        },
-        syncType: 'UPDATE_PROJECT',
-        queryKey: ['projects'],
-        onSuccess: (data, variables) => {
-            if (!isOnline) {
-                queryClient.setQueryData(['projects'], (old: Project[] = []) =>
-                    old.map(p => p.id === variables.id ? { ...p, title: variables.title } : p)
-                );
-            }
-            setIsRenameModalOpen(false);
-            setIsMenuOpen(false);
+    const handleRename = () => {
+        if (selectedProject && newTitle.trim()) {
+            updateProjectMutation.mutate(
+                { id: selectedProject.id, title: newTitle.trim() },
+                {
+                    onSuccess: () => {
+                        setIsRenameModalOpen(false);
+                        setIsMenuOpen(false);
+                    }
+                }
+            );
         }
-    });
+    };
 
-    const deleteMutation = useSafeMutation({
-        mutationFn: async (id: string) => {
-            await api.delete(`/projects/${id}`);
-        },
-        syncType: 'DELETE_PROJECT',
-        queryKey: ['projects'],
-        onSuccess: (data, id) => {
-            if (!isOnline) {
-                queryClient.setQueryData(['projects'], (old: Project[] = []) =>
-                    old.filter(p => p.id !== id)
-                );
-            }
-            setIsDeleteModalOpen(false);
-            setIsMenuOpen(false);
+    const handleDelete = () => {
+        if (selectedProject) {
+            deleteProjectMutation.mutate(selectedProject.id, {
+                onSuccess: () => {
+                    setIsDeleteModalOpen(false);
+                    setIsMenuOpen(false);
+                }
+            });
         }
-    });
+    };
 
-    const projects = Array.isArray(data) ? data : [];
+    const projectList = Array.isArray(projects) ? projects : [];
 
     const handleRefresh = async () => {
         setIsRefreshing(true);
-        await Promise.all([
-            refetch(),
-            refetchWeekly()
-        ]);
+        if (navigator.onLine) {
+            await syncMutation.mutateAsync();
+        }
+        await Promise.all([refetch(), refetchWeekly()]);
         setIsRefreshing(false);
     };
 
@@ -148,7 +133,7 @@ export default function Dashboard() {
         setPullDistance(0);
     };
 
-    // --- GESTION DU LONG PRESS AMÉLIORÉE ---
+    // --- GESTION DU LONG PRESS ---
     const handlePointerDown = (project: Project, e: React.PointerEvent) => {
         e.stopPropagation();
         setLongPressTriggered(false);
@@ -160,11 +145,10 @@ export default function Dashboard() {
             setNewTitle(project.title);
             setIsMenuOpen(true);
 
-            // Vibration haptique si disponible
             if (navigator.vibrate) {
                 navigator.vibrate(50);
             }
-        }, 500); // Réduit à 500ms pour être plus réactif
+        }, 500);
     };
 
     const handlePointerUp = (e: React.PointerEvent) => {
@@ -183,15 +167,12 @@ export default function Dashboard() {
 
     const handleCardClick = (projectId: string, e: React.MouseEvent) => {
         e.stopPropagation();
-
-        // Vérifier si c'était un long press récent (dans les 200ms)
         const timeSincePress = Date.now() - pressStartTime.current;
 
         if (!longPressTriggered && timeSincePress > 200) {
             navigate(`/projects/${projectId}`);
         }
 
-        // Réinitialiser le flag
         setTimeout(() => {
             setLongPressTriggered(false);
             pressStartTime.current = 0;
@@ -199,16 +180,19 @@ export default function Dashboard() {
     };
 
     // --- TRI DES PROJETS ---
-    const sortedProjects = [...projects].sort((a, b) =>
+    const sortedProjects = [...projectList].sort((a, b) =>
         new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
     );
 
     const lastProject = sortedProjects[0];
     const otherProjects = sortedProjects.slice(1);
 
+    // Compter les projets en attente de sync
+    const pendingCount = projectList.filter(p => p._syncStatus === 'pending').length;
+
     // --- RENDU ---
 
-    if (isError && projects.length === 0) {
+    if (isError && projectList.length === 0) {
         return (
             <div className="h-screen flex flex-col items-center justify-center text-zinc-500 bg-background gap-4 p-4 text-center">
                 <WifiOff size={48} />
@@ -236,6 +220,16 @@ export default function Dashboard() {
                         <h1 className="text-2xl font-bold">Bonjour !</h1>
                     </div>
                     <div className="flex items-center gap-3">
+                        {!isOnline && (
+                            <span className="text-[10px] bg-orange-500/20 text-orange-400 px-2 py-1 rounded-full border border-orange-500/50 flex items-center gap-1">
+                                <WifiOff size={12} /> Hors ligne
+                            </span>
+                        )}
+                        {pendingCount > 0 && (
+                            <span className="text-[10px] bg-yellow-500/20 text-yellow-400 px-2 py-1 rounded-full">
+                                {pendingCount} en attente
+                            </span>
+                        )}
                         <button onClick={() => navigate('/settings')} className="p-2 rounded-full bg-secondary text-gray-400 hover:text-white transition">
                             <Settings size={20} />
                         </button>
@@ -288,7 +282,7 @@ export default function Dashboard() {
                             <div className="h-32 bg-secondary/50 rounded-xl animate-pulse" />
                         </div>
                     </div>
-                ) : projects.length === 0 ? (
+                ) : projectList.length === 0 ? (
                     <div className="text-center py-12 px-4 bg-secondary/30 rounded-2xl border-2 border-dashed border-zinc-800">
                         <Package size={48} className="mx-auto mb-4 text-zinc-600" />
                         <p className="font-medium mb-1">Ton atelier est vide</p>
@@ -306,6 +300,14 @@ export default function Dashboard() {
                                 className={`relative overflow-hidden bg-secondary p-5 rounded-3xl border shadow-lg shadow-primary/5 cursor-pointer active:scale-[0.98] transition-all select-none mb-4 ${lastProject.status === 'completed' ? 'border-green-500/30 bg-green-500/5' : 'border-primary/20'}`}
                             >
                                 <img src="/logo.svg" alt="" className="absolute top-3 right-3 w-16 h-16 opacity-50 pointer-events-none" />
+
+                                {/* Indicateur de sync */}
+                                {lastProject._syncStatus === 'pending' && (
+                                    <div className="absolute top-3 left-3 bg-yellow-500/20 text-yellow-400 text-[10px] px-2 py-0.5 rounded-full">
+                                        Non synchronisé
+                                    </div>
+                                )}
+
                                 <div className="flex items-center gap-2 mb-3">
                                     <span className={`inline-block text-[10px] px-3 py-1 rounded-full font-bold uppercase tracking-wider ${lastProject.status === 'completed' ? 'bg-green-500/20 text-green-400' : 'bg-primary/20 text-primary'}`}>
                                         {lastProject.status === 'completed' ? 'Terminé' : 'Dernier projet'}
@@ -339,8 +341,11 @@ export default function Dashboard() {
                                         onPointerUp={handlePointerUp}
                                         onPointerMove={handlePointerMove}
                                         onClick={(e) => handleCardClick(proj.id, e)}
-                                        className={`p-4 rounded-xl border active:scale-[0.96] transition-transform flex flex-col justify-between h-32 bg-secondary select-none cursor-pointer ${proj.status === 'completed' ? 'border-green-500/30 bg-green-500/5' : 'border-zinc-800'}`}
+                                        className={`relative p-4 rounded-xl border active:scale-[0.96] transition-transform flex flex-col justify-between h-32 bg-secondary select-none cursor-pointer ${proj.status === 'completed' ? 'border-green-500/30 bg-green-500/5' : 'border-zinc-800'}`}
                                     >
+                                        {proj._syncStatus === 'pending' && (
+                                            <div className="absolute top-2 right-2 w-2 h-2 bg-yellow-400 rounded-full" title="Non synchronisé" />
+                                        )}
                                         <div className={`w-8 h-8 rounded-full flex items-center justify-center mb-2 font-bold text-xs ${proj.status === 'completed' ? 'bg-green-500/20 text-green-400' : 'bg-zinc-800 text-zinc-500'}`}>
                                             {proj.status === 'completed' ? <CheckCircle size={14} /> : '#'}
                                         </div>
@@ -402,8 +407,8 @@ export default function Dashboard() {
                     <div className="flex gap-3 mt-4">
                         <Button variant="secondary" onClick={() => setIsRenameModalOpen(false)} className="flex-1">Annuler</Button>
                         <Button
-                            onClick={() => selectedProject && renameMutation.mutate({ id: selectedProject.id, title: newTitle })}
-                            isLoading={renameMutation.isPending}
+                            onClick={handleRename}
+                            isLoading={updateProjectMutation.isPending}
                             className="flex-1"
                         >
                             Valider
@@ -423,8 +428,8 @@ export default function Dashboard() {
                         <Button variant="secondary" onClick={() => setIsDeleteModalOpen(false)} className="flex-1">Annuler</Button>
                         <Button
                             variant="danger"
-                            onClick={() => selectedProject && deleteMutation.mutate(selectedProject.id)}
-                            isLoading={deleteMutation.isPending}
+                            onClick={handleDelete}
+                            isLoading={deleteProjectMutation.isPending}
                             className="flex-1"
                         >
                             Supprimer

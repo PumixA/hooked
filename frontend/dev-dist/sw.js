@@ -67,7 +67,7 @@ if (!self.define) {
     });
   };
 }
-define(['./workbox-55a4ce24'], (function (workbox) { 'use strict';
+define(['./workbox-ffd35893'], (function (workbox) { 'use strict';
 
   self.skipWaiting();
   workbox.clientsClaim();
@@ -82,27 +82,5 @@ define(['./workbox-55a4ce24'], (function (workbox) { 'use strict';
     "revision": "3ca0b8505b4bec776b69afdba2768812"
   }], {});
   workbox.cleanupOutdatedCaches();
-  workbox.registerRoute(/^http:\/\/192\.168\.1\.96:3000\/categories/, new workbox.StaleWhileRevalidate({
-    "cacheName": "api-static-data",
-    plugins: [new workbox.ExpirationPlugin({
-      maxEntries: 50,
-      maxAgeSeconds: 604800
-    }), new workbox.CacheableResponsePlugin({
-      statuses: [0, 200]
-    })]
-  }), 'GET');
-  workbox.registerRoute(/^http:\/\/192\.168\.1\.96:3000\/(projects|sessions|users|materials|photos|notes).*/, new workbox.NetworkFirst({
-    "cacheName": "api-dynamic-data",
-    "networkTimeoutSeconds": 3,
-    "matchOptions": {
-      "ignoreVary": true
-    },
-    plugins: [new workbox.ExpirationPlugin({
-      maxEntries: 100,
-      maxAgeSeconds: 86400
-    }), new workbox.CacheableResponsePlugin({
-      statuses: [0, 200]
-    })]
-  }), 'GET');
 
 }));

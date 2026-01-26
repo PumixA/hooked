@@ -1,45 +1,42 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Loader2 } from 'lucide-react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useSync } from '../context/SyncContext';
-import api from '../services/api';
+import { ArrowLeft, Loader2, WifiOff } from 'lucide-react';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
-
-interface Category {
-    id: string;
-    label: string;
-    icon?: string;
-}
+import { useCreateProject, useCategories } from '../hooks/useOfflineData';
 
 export default function ProjectCreate() {
     const navigate = useNavigate();
-    const { isOnline, addToQueue } = useSync();
-    const queryClient = useQueryClient();
 
     // États du formulaire
     const [title, setTitle] = useState('');
     const [goalRows, setGoalRows] = useState('');
     const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
     const [selectedHookSize, setSelectedHookSize] = useState<string>("");
-    const [isLoading, setIsLoading] = useState(false);
 
-    // Récupération des catégories depuis l'API
-    const { data: categories = [], isLoading: isLoadingCategories } = useQuery({
-        queryKey: ['categories'],
-        queryFn: async () => {
-            const response = await api.get('/categories');
-            return response.data as Category[];
-        }
-    });
+    // État de connexion
+    const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+    useEffect(() => {
+        const handleOnline = () => setIsOnline(true);
+        const handleOffline = () => setIsOnline(false);
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+        return () => {
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
+        };
+    }, []);
+
+    // 🔥 OFFLINE-FIRST: Utilisation des hooks locaux
+    const { data: categories = [], isLoading: isLoadingCategories } = useCategories();
+    const createProjectMutation = useCreateProject();
 
     const hookSizes = ["2.0mm", "2.5mm", "3.0mm", "3.5mm", "4.0mm", "4.5mm", "5.0mm", "5.5mm", "6.0mm"];
 
     // Gestion de l'input numérique strict
     const handleGoalRowsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const value = e.target.value;
-        // N'accepte que les chiffres (regex)
         if (value === '' || /^\d+$/.test(value)) {
             setGoalRows(value);
         }
@@ -47,91 +44,20 @@ export default function ProjectCreate() {
 
     const handleSubmit = async (e?: React.FormEvent) => {
         if (e) e.preventDefault();
-        if (!title || isLoading) return;
+        if (!title || createProjectMutation.isPending) return;
 
-        const payload = {
-            title,
-            category_id: selectedCategoryId || undefined, // Optionnel
-            goal_rows: goalRows ? parseInt(goalRows) : undefined, // Optionnel
-            // hook_size: selectedHookSize || undefined // Optionnel (si le back le supporte un jour)
-        };
-
-        setIsLoading(true);
-
-        try {
-            let projectId = '';
-
-            // Vérifier si on est vraiment offline
-            if (!isOnline || !navigator.onLine) {
-                // Ajouter à la queue
-                addToQueue('CREATE_PROJECT', payload);
-
-                // ID temporaire pour la navigation
-                projectId = `temp-${Date.now()}`;
-
-                // Mise à jour optimiste du cache
-                const tempProject = {
-                    ...payload,
-                    id: projectId,
-                    created_at: new Date().toISOString(),
-                    updated_at: new Date().toISOString(),
-                    completed_rows: 0,
-                    isOffline: true
-                };
-
-                queryClient.setQueryData(['projects'], (oldData: any) => {
-                    if (Array.isArray(oldData)) {
-                        return [tempProject, ...oldData];
-                    }
-                    return [tempProject];
-                });
-
-                // Attendre un tout petit peu pour être sûr
-                await new Promise(resolve => setTimeout(resolve, 100));
-            } else {
-                // Appel API normal
-                const response = await api.post('/projects', payload);
-                projectId = response.data.id;
-
-                // Invalider le cache
-                await queryClient.invalidateQueries({ queryKey: ['projects'] });
+        createProjectMutation.mutate(
+            {
+                title,
+                category_id: selectedCategoryId || undefined,
+                goal_rows: goalRows ? parseInt(goalRows) : undefined,
+            },
+            {
+                onSuccess: (project) => {
+                    navigate(`/projects/${project.id}`, { replace: true });
+                }
             }
-
-            setIsLoading(false);
-            // Navigation vers le projet créé
-            navigate(`/projects/${projectId}`, { replace: true });
-
-        } catch (error: any) {
-            console.error("❌ Erreur:", error);
-
-            // Vérifier si c'est une erreur réseau
-            if (!error.response || error.code === 'ECONNABORTED' || error.message === 'Network Error') {
-                addToQueue('CREATE_PROJECT', payload);
-                
-                const projectId = `temp-${Date.now()}`;
-                const tempProject = {
-                    ...payload,
-                    id: projectId,
-                    created_at: new Date().toISOString(),
-                    updated_at: new Date().toISOString(),
-                    completed_rows: 0,
-                    isOffline: true
-                };
-
-                queryClient.setQueryData(['projects'], (oldData: any) => {
-                    if (Array.isArray(oldData)) {
-                        return [tempProject, ...oldData];
-                    }
-                    return [tempProject];
-                });
-
-                setIsLoading(false);
-                navigate(`/projects/${projectId}`, { replace: true });
-            } else {
-                setIsLoading(false);
-                alert("Erreur lors de la création du projet");
-            }
-        }
+        );
     };
 
     return (
@@ -152,11 +78,12 @@ export default function ProjectCreate() {
 
             {/* --- CONTENU SCROLLABLE --- */}
             <div className="flex-1 overflow-y-auto pt-20 px-4 pb-8">
-                
+
                 {/* Indicateur de statut de connexion */}
                 {!isOnline && (
-                    <div className="mb-6 p-3 bg-yellow-900/30 border border-yellow-600/50 rounded-lg text-yellow-200 text-sm">
-                        📡 Mode hors ligne - Votre projet sera synchronisé automatiquement
+                    <div className="mb-6 p-3 bg-yellow-900/30 border border-yellow-600/50 rounded-lg text-yellow-200 text-sm flex items-center gap-2">
+                        <WifiOff size={16} />
+                        Mode hors ligne - Votre projet sera synchronisé automatiquement
                     </div>
                 )}
 
@@ -174,7 +101,7 @@ export default function ProjectCreate() {
                         required
                     />
 
-                    {/* 2. Catégories (API) */}
+                    {/* 2. Catégories */}
                     <div className="space-y-3">
                         <label className="text-xs text-zinc-400 ml-1 uppercase tracking-wider font-bold">Catégorie</label>
 
@@ -182,6 +109,8 @@ export default function ProjectCreate() {
                             <div className="flex gap-2 text-zinc-500 text-sm items-center">
                                 <Loader2 className="animate-spin" size={16} /> Chargement des catégories...
                             </div>
+                        ) : categories.length === 0 ? (
+                            <p className="text-zinc-500 text-sm">Aucune catégorie disponible</p>
                         ) : (
                             <div className="flex flex-wrap gap-2">
                                 {categories.map((cat) => (
@@ -222,11 +151,11 @@ export default function ProjectCreate() {
                         </div>
                     </div>
 
-                    {/* 4. Nombre de rangs (Chiffres uniquement) */}
+                    {/* 4. Nombre de rangs */}
                     <Input
                         label="Nombre de rangs (optionnel)"
-                        type="text" // On utilise text pour contrôler totalement via regex
-                        inputMode="numeric" // Clavier numérique sur mobile
+                        type="text"
+                        inputMode="numeric"
                         placeholder="Ex: 60"
                         value={goalRows}
                         onChange={handleGoalRowsChange}
@@ -235,17 +164,17 @@ export default function ProjectCreate() {
                         Laissez vide si vous ne connaissez pas encore le nombre de rangs
                     </p>
 
-                    {/* Espace vide pour permettre le scroll si nécessaire */}
+                    {/* Espace vide */}
                     <div className="h-4" />
 
                     {/* Bouton d'action */}
                     <Button
                         type="submit"
-                        isLoading={isLoading}
-                        disabled={!title || isLoading}
+                        isLoading={createProjectMutation.isPending}
+                        disabled={!title || createProjectMutation.isPending}
                         className="w-full py-4 text-lg shadow-lg shadow-primary/20"
                     >
-                        {isLoading
+                        {createProjectMutation.isPending
                             ? 'Création...'
                             : isOnline
                                 ? 'Commencer le projet'

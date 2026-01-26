@@ -13,6 +13,33 @@ const api = axios.create({
     timeout: 5000,
 });
 
+// État global de connexion (synchronisé avec SyncContext)
+let isOfflineMode = !navigator.onLine;
+
+// Listener pour mettre à jour l'état
+window.addEventListener('online', () => {
+    console.log('🌐 [API] Connexion rétablie');
+    isOfflineMode = false;
+});
+window.addEventListener('offline', () => {
+    console.log('📡 [API] Connexion perdue');
+    isOfflineMode = true;
+});
+
+/**
+ * Permet de forcer le mode offline depuis l'extérieur (SyncContext)
+ */
+export function setOfflineMode(offline: boolean) {
+    isOfflineMode = offline;
+}
+
+/**
+ * Retourne l'état actuel du mode offline
+ */
+export function getOfflineMode(): boolean {
+    return isOfflineMode;
+}
+
 // 1. Intercepteur de REQUÊTE
 api.interceptors.request.use(
     (config: InternalAxiosRequestConfig) => {
@@ -20,6 +47,19 @@ api.interceptors.request.use(
         if (token) {
             config.headers.set('Authorization', `Bearer ${token}`);
         }
+
+        // 🔥 OFFLINE-FIRST: Bloquer les requêtes GET en mode hors ligne
+        // Les mutations (POST, PATCH, DELETE) sont gérées par useSafeMutation
+        if (isOfflineMode && config.method?.toLowerCase() === 'get') {
+            console.log(`🚫 [API] Requête GET bloquée (offline): ${config.url}`);
+            // On rejette avec une erreur spéciale que React Query peut gérer
+            return Promise.reject({
+                code: 'OFFLINE_MODE',
+                message: 'Application en mode hors ligne - utilisation du cache',
+                config
+            });
+        }
+
         return config;
     },
     (error) => {

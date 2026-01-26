@@ -1,35 +1,43 @@
 import { useSync } from '../context/SyncContext';
-import { WifiOff, RefreshCw } from 'lucide-react';
+import { useSyncStatus } from '../context/AppContext';
+import { WifiOff, Cloud } from 'lucide-react';
 
+/**
+ * Indicateur de statut reseau et mode de synchronisation
+ *
+ * Affiche:
+ * - Mode Local (smartphone) si pas de compte ou sync desactivee
+ * - Mode Cloud (nuage) si sync activee
+ * - Hors-ligne (wifi barre) si pas de connexion
+ */
 export default function NetworkStatus() {
-    const { isOnline, queue, syncNow, isSyncing } = useSync();
+    const { isOnline } = useSync();
+    const { isSyncActive } = useSyncStatus();
 
-    // Si on est en ligne et qu'il n'y a rien à synchroniser, on n'affiche rien
-    if (isOnline && queue.length === 0) return null;
+    // En mode local, ne rien afficher si online (fonctionnement normal)
+    if (!isSyncActive && isOnline) {
+        return null;
+    }
 
-    return (
-        <button
-            onClick={() => isOnline && queue.length > 0 && !isSyncing ? syncNow() : null}
-            disabled={!isOnline || isSyncing}
-            className={`
-                fixed top-4 right-16 z-50 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all shadow-lg backdrop-blur-md border
-                ${!isOnline 
-                    ? "bg-red-500/20 text-red-400 border-red-500/50" 
-                    : "bg-orange-500/20 text-orange-400 border-orange-500/50 cursor-pointer hover:bg-orange-500/30"
-                }
-            `}
-        >
-            {!isOnline ? (
-                <>
-                    <WifiOff size={14} />
-                    <span>Hors-ligne</span>
-                </>
-            ) : (
-                <>
-                    <RefreshCw size={14} className={isSyncing ? "animate-spin" : ""} />
-                    <span>{isSyncing ? "Sync..." : `${queue.length} en attente`}</span>
-                </>
-            )}
-        </button>
-    );
+    // Hors ligne
+    if (!isOnline) {
+        return (
+            <div className="fixed top-4 right-4 z-50 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium bg-red-500/20 text-red-400 border border-red-500/50 shadow-lg backdrop-blur-md">
+                <WifiOff size={14} />
+                <span>Hors-ligne</span>
+            </div>
+        );
+    }
+
+    // Mode cloud actif et en ligne
+    if (isSyncActive && isOnline) {
+        return (
+            <div className="fixed top-4 right-4 z-50 flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium bg-green-500/20 text-green-400 border border-green-500/50 shadow-lg backdrop-blur-md">
+                <Cloud size={14} />
+                <span>Sync active</span>
+            </div>
+        );
+    }
+
+    return null;
 }
