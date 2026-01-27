@@ -125,4 +125,32 @@ export async function sessionsRoutes(server: FastifyInstance) {
             return reply.code(500).send({ error: "Erreur lors du calcul du temps hebdomadaire" });
         }
     });
+
+    // DELETE /api/sessions/:id -> Supprimer une session
+    server.delete('/:id', async (request, reply) => {
+        const { id } = request.params as { id: string };
+        const userId = request.user.id;
+
+        // Vérifier que la session existe et appartient à un projet de l'utilisateur
+        const session = await prisma.sessions.findUnique({
+            where: { id },
+            include: { projects: true }
+        });
+
+        if (!session) {
+            return reply.code(404).send({ error: "Session introuvable" });
+        }
+
+        if (session.projects?.user_id !== userId) {
+            return reply.code(403).send({ error: "Accès interdit" });
+        }
+
+        try {
+            await prisma.sessions.delete({ where: { id } });
+            return reply.code(204).send();
+        } catch (err) {
+            server.log.error(err);
+            return reply.code(500).send({ error: "Erreur lors de la suppression" });
+        }
+    });
 }

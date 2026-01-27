@@ -31,6 +31,7 @@ export default function Dashboard() {
     const [longPressTriggered, setLongPressTriggered] = useState(false);
 
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const pressStartTime = useRef<number>(0);
 
     // Hooks de donnees locales
     const { data: projects = [], isLoading: isProjectsLoading, isError, refetch } = useProjects();

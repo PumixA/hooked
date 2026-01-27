@@ -47,20 +47,9 @@ export default function MaterialEdit() {
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!formData || !id) return;
+        if (!formData || !id || !formData.name) return;
 
-        const isYarn = formData.category_type === 'yarn';
-        if (isYarn && !formData.name) return;
-        if (!isYarn && !formData.size) return;
-
-        // Si pas de nom mais une taille, utiliser la taille comme nom
-        const materialData = {
-            id,
-            ...formData,
-            name: formData.name || (formData.size ? `${formData.size}mm` : '')
-        };
-
-        updateMutation.mutate(materialData, {
+        updateMutation.mutate({ id, ...formData }, {
             onSuccess: () => {
                 navigate('/inventory');
             }
@@ -127,36 +116,28 @@ export default function MaterialEdit() {
                     </div>
                 </div>
 
-                {isYarn ? (
-                    <Input
-                        label="Nom / Couleur *"
-                        value={formData.name}
-                        onChange={(e) => setFormData({...formData, name: e.target.value})}
-                        required
-                    />
-                ) : (
-                    <>
-                        <div className="space-y-2">
-                            <label className="text-xs text-zinc-400 ml-1">Taille (mm) *</label>
-                            <div className="relative">
-                                <input
-                                    type="text"
-                                    inputMode="decimal"
-                                    placeholder="Ex: 4"
-                                    value={formData.size || ''}
-                                    onChange={handleSizeChange}
-                                    className="w-full p-4 pr-12 rounded-xl bg-secondary border border-zinc-800 text-white placeholder-zinc-500 focus:outline-none focus:border-primary transition-colors"
-                                    required
-                                />
-                                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500">mm</span>
-                            </div>
+                <Input
+                    label="Nom *"
+                    value={formData.name}
+                    onChange={(e) => setFormData({...formData, name: e.target.value})}
+                    required
+                />
+
+                {!isYarn && (
+                    <div className="space-y-2">
+                        <label className="text-xs text-zinc-400 ml-1">Taille (mm)</label>
+                        <div className="relative">
+                            <input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="Ex: 4"
+                                value={formData.size || ''}
+                                onChange={handleSizeChange}
+                                className="w-full p-4 pr-12 rounded-xl bg-secondary border border-zinc-800 text-white placeholder-zinc-500 focus:outline-none focus:border-primary transition-colors"
+                            />
+                            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500">mm</span>
                         </div>
-                        <Input
-                            label="Nom (optionnel)"
-                            value={formData.name}
-                            onChange={(e) => setFormData({...formData, name: e.target.value})}
-                        />
-                    </>
+                    </div>
                 )}
 
                 <Input
@@ -175,7 +156,7 @@ export default function MaterialEdit() {
                     <Button
                         type="submit"
                         isLoading={updateMutation.isPending}
-                        disabled={isYarn ? !formData.name : !formData.size}
+                        disabled={!formData.name}
                         className="w-full flex items-center justify-center gap-2"
                     >
                         <Save size={20} />

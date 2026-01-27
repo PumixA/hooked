@@ -47,9 +47,9 @@ export function useCreateProject() {
 
     return useMutation({
         mutationFn: async (data: { title: string; goal_rows?: number; category_id?: string; material_ids?: string[] }) => {
-            const id = generateLocalId();
+            const localId = generateLocalId();
             const project = await localDb.saveProject({
-                id,
+                id: localId,
                 title: data.title,
                 goal_rows: data.goal_rows,
                 category_id: data.category_id,
@@ -60,9 +60,23 @@ export function useCreateProject() {
                 _syncStatus: 'pending'
             });
 
-            // Sync en background si activee
+            // Sync et attendre pour obtenir le vrai ID si possible
             if (canSync()) {
-                syncService.syncAll().catch(console.error);
+                try {
+                    await syncService.syncAll();
+                    // Après la sync, vérifier si le projet a été migré vers un nouvel ID
+                    const migratedProject = await localDb.getProject(localId);
+                    if (!migratedProject) {
+                        // Le projet local a été migré, chercher par titre (le plus récent)
+                        const allProjects = await localDb.getAllProjects();
+                        const found = allProjects.find(p => p.title === data.title && !p.id.startsWith('local-'));
+                        if (found) {
+                            return found;
+                        }
+                    }
+                } catch (err) {
+                    console.error('[useCreateProject] Sync error:', err);
+                }
             }
 
             return project;
@@ -99,16 +113,12 @@ export function useDeleteProject() {
 
     return useMutation({
         mutationFn: async (id: string) => {
+            // Suppression locale + tracking pour sync ultérieure
             await localDb.deleteProject(id);
 
-            // Si sync activee et projet etait synced, supprimer cote serveur
-            if (canSync() && !id.startsWith('local-')) {
-                try {
-                    const api = (await import('../services/api')).default;
-                    await api.delete(`/projects/${id}`);
-                } catch {
-                    // Ignore si deja supprime
-                }
+            // Lancer la sync pour propager la suppression
+            if (canSync()) {
+                syncService.syncAll().catch(console.error);
             }
         },
         onSuccess: () => {
@@ -195,15 +205,12 @@ export function useDeleteMaterial() {
 
     return useMutation({
         mutationFn: async (id: string) => {
+            // Suppression locale + tracking pour sync ultérieure
             await localDb.deleteMaterial(id);
 
-            if (canSync() && !id.startsWith('local-')) {
-                try {
-                    const api = (await import('../services/api')).default;
-                    await api.delete(`/materials/${id}`);
-                } catch {
-                    // Ignore
-                }
+            // Lancer la sync pour propager la suppression
+            if (canSync()) {
+                syncService.syncAll().catch(console.error);
             }
         },
         onSuccess: () => {
@@ -255,15 +262,12 @@ export function useDeleteNote() {
 
     return useMutation({
         mutationFn: async (data: { id: string; project_id: string }) => {
+            // Suppression locale + tracking pour sync ultérieure
             await localDb.deleteNote(data.id);
 
-            if (canSync() && !data.id.startsWith('local-')) {
-                try {
-                    const api = (await import('../services/api')).default;
-                    await api.delete(`/notes/${data.id}`);
-                } catch {
-                    // Ignore
-                }
+            // Lancer la sync pour propager la suppression
+            if (canSync()) {
+                syncService.syncAll().catch(console.error);
             }
         },
         onSuccess: (_, variables) => {
@@ -328,15 +332,12 @@ export function useDeletePhoto() {
 
     return useMutation({
         mutationFn: async (data: { id: string; project_id: string }) => {
+            // Suppression locale + tracking pour sync ultérieure
             await localDb.deletePhoto(data.id);
 
-            if (canSync() && !data.id.startsWith('local-')) {
-                try {
-                    const api = (await import('../services/api')).default;
-                    await api.delete(`/photos/${data.id}`);
-                } catch {
-                    // Ignore
-                }
+            // Lancer la sync pour propager la suppression
+            if (canSync()) {
+                syncService.syncAll().catch(console.error);
             }
         },
         onSuccess: (_, variables) => {

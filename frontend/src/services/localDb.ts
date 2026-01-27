@@ -6,7 +6,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 
 const DB_NAME = 'hooked-offline-db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 // --- TYPES ---
 export interface LocalProject {
@@ -83,6 +83,14 @@ export interface LocalCategory {
     icon?: string;
 }
 
+// Tracking des suppressions locales pour sync
+export interface LocalDeletion {
+    id: string;
+    entity_type: 'project' | 'material' | 'session' | 'photo' | 'note' | 'category';
+    entity_id: string;
+    deleted_at: number;
+}
+
 interface HookedOfflineDB extends DBSchema {
     projects: {
         key: string;
@@ -117,15 +125,30 @@ interface HookedOfflineDB extends DBSchema {
         key: string;
         value: { key: string; value: any };
     };
+    deletions: {
+        key: string;
+        value: LocalDeletion;
+        indexes: { 'by-entity': string };
+    };
 }
 
 let dbInstance: IDBPDatabase<HookedOfflineDB> | null = null;
 
 async function getDb(): Promise<IDBPDatabase<HookedOfflineDB>> {
-    if (dbInstance) return dbInstance;
+    if (dbInstance) {
+        // Vérifier si la version de la DB est à jour
+        if (dbInstance.version < DB_VERSION) {
+            console.log(`[LocalDB] Upgrading DB from version ${dbInstance.version} to ${DB_VERSION}`);
+            dbInstance.close();
+            dbInstance = null;
+        } else {
+            return dbInstance;
+        }
+    }
 
     dbInstance = await openDB<HookedOfflineDB>(DB_NAME, DB_VERSION, {
-        upgrade(db, _oldVersion) {
+        upgrade(db, oldVersion) {
+            console.log(`[LocalDB] Upgrading from version ${oldVersion} to ${DB_VERSION}`);
             // Projects
             if (!db.objectStoreNames.contains('projects')) {
                 const projectStore = db.createObjectStore('projects', { keyPath: 'id' });
@@ -169,6 +192,12 @@ async function getDb(): Promise<IDBPDatabase<HookedOfflineDB>> {
             if (!db.objectStoreNames.contains('metadata')) {
                 db.createObjectStore('metadata', { keyPath: 'key' });
             }
+
+            // Deletions (pour tracker les suppressions locales à synchroniser)
+            if (!db.objectStoreNames.contains('deletions')) {
+                const deletionStore = db.createObjectStore('deletions', { keyPath: 'id' });
+                deletionStore.createIndex('by-entity', 'entity_type');
+            }
         },
     });
 
@@ -210,9 +239,14 @@ export const localDb = {
             syncStatus = 'pending';
         }
 
+        // Gestion spéciale de end_date: si explicitement fourni (même undefined), utiliser la valeur fournie
+        // Sinon, garder la valeur existante
+        const hasEndDateProp = 'end_date' in project;
+        const endDateValue = hasEndDateProp ? project.end_date : existing?.end_date;
+
         const fullProject: LocalProject = {
             id: project.id,
-            title: project.title || existing?.title || 'Sans titre',
+            title: project.title !== undefined ? project.title : (existing?.title || 'Sans titre'),
             current_row: project.current_row ?? existing?.current_row ?? 0,
             goal_rows: project.goal_rows ?? existing?.goal_rows,
             total_duration: project.total_duration ?? existing?.total_duration ?? 0,
@@ -221,7 +255,7 @@ export const localDb = {
             material_ids: project.material_ids ?? existing?.material_ids,
             created_at: existing?.created_at || project.created_at || new Date().toISOString(),
             updated_at: new Date().toISOString(),
-            end_date: project.end_date ?? existing?.end_date,
+            end_date: endDateValue,
             _syncStatus: syncStatus,
             _localUpdatedAt: now,
             _isLocal: project._isLocal ?? existing?._isLocal ?? true,
@@ -232,8 +266,15 @@ export const localDb = {
         return fullProject;
     },
 
-    async deleteProject(id: string): Promise<void> {
+    async deleteProject(id: string, trackForSync: boolean = true): Promise<void> {
         const db = await getDb();
+        const project = await db.get('projects', id);
+
+        // Tracker la suppression pour sync si c'est un projet synchronisé (pas local-only)
+        if (trackForSync && project && !project._isLocal && !id.startsWith('local-')) {
+            await this.trackDeletion('project', id);
+        }
+
         await db.delete('projects', id);
         // Supprimer aussi les données liées
         const sessions = await db.getAllFromIndex('sessions', 'by-project', id);
@@ -302,8 +343,15 @@ export const localDb = {
         return fullMaterial;
     },
 
-    async deleteMaterial(id: string): Promise<void> {
+    async deleteMaterial(id: string, trackForSync: boolean = true): Promise<void> {
         const db = await getDb();
+        const material = await db.get('materials', id);
+
+        // Tracker la suppression pour sync si c'est un matériel synchronisé
+        if (trackForSync && material && !material._isLocal && !id.startsWith('local-')) {
+            await this.trackDeletion('material', id);
+        }
+
         await db.delete('materials', id);
         console.log(`🗑️ [LocalDB] Material deleted: ${id}`);
     },
@@ -397,8 +445,15 @@ export const localDb = {
         return fullNote;
     },
 
-    async deleteNote(id: string): Promise<void> {
+    async deleteNote(id: string, trackForSync: boolean = true): Promise<void> {
         const db = await getDb();
+        const note = await db.get('notes', id);
+
+        // Tracker la suppression pour sync si c'est une note synchronisée
+        if (trackForSync && note && !note._isLocal && !id.startsWith('local-')) {
+            await this.trackDeletion('note', id);
+        }
+
         await db.delete('notes', id);
         console.log(`🗑️ [LocalDB] Note deleted: ${id}`);
     },
@@ -447,8 +502,15 @@ export const localDb = {
         return fullPhoto;
     },
 
-    async deletePhoto(id: string): Promise<void> {
+    async deletePhoto(id: string, trackForSync: boolean = true): Promise<void> {
         const db = await getDb();
+        const photo = await db.get('photos', id);
+
+        // Tracker la suppression pour sync si c'est une photo synchronisée
+        if (trackForSync && photo && !photo._isLocal && !id.startsWith('local-')) {
+            await this.trackDeletion('photo', id);
+        }
+
         await db.delete('photos', id);
         console.log(`🗑️ [LocalDB] Photo deleted: ${id}`);
     },
@@ -495,24 +557,44 @@ export const localDb = {
     }): Promise<void> {
         const db = await getDb();
 
+        // Récupérer les suppressions locales pour ne pas re-télécharger des éléments supprimés
+        const deletedProjects = await this.getDeletionsByType('project');
+        const deletedMaterials = await this.getDeletionsByType('material');
+        const deletedProjectIds = new Set(deletedProjects.map(d => d.entity_id));
+        const deletedMaterialIds = new Set(deletedMaterials.map(d => d.entity_id));
+
         if (data.projects) {
             const tx = db.transaction('projects', 'readwrite');
             for (const p of data.projects) {
-                const existing = await tx.store.get(p.id);
-                // Ne pas écraser si on a des changements locaux non synchronisés
-                if (!existing || existing._syncStatus === 'synced') {
-                    // Préserver les valeurs locales si elles sont plus récentes/différentes
-                    const mergedProject = {
-                        ...p,
-                        // Garder les valeurs locales si elles sont supérieures (évite de perdre le travail)
-                        current_row: existing ? Math.max(existing.current_row || 0, p.current_row || 0) : (p.current_row || 0),
-                        total_duration: existing ? Math.max(existing.total_duration || 0, p.total_duration || 0) : (p.total_duration || 0),
-                        _syncStatus: 'synced' as const,
-                        _localUpdatedAt: Date.now(),
-                        _isLocal: false,
-                    };
-                    await tx.store.put(mergedProject);
+                // Ne pas importer les projets supprimés localement
+                if (deletedProjectIds.has(p.id)) {
+                    console.log(`⏭️ [LocalDB] Skipping deleted project: ${p.id}`);
+                    continue;
                 }
+
+                const existing = await tx.store.get(p.id);
+
+                // Comparer les timestamps pour déterminer quelle version garder
+                const remoteUpdated = new Date(p.updated_at || p.created_at).getTime();
+                const localUpdated = existing?._localUpdatedAt || 0;
+
+                // Si on a des changements locaux non synchronisés ET plus récents, ne pas écraser
+                if (existing && existing._syncStatus === 'pending' && localUpdated > remoteUpdated) {
+                    console.log(`⏭️ [LocalDB] Keeping local version of project: ${p.title} (local is newer)`);
+                    continue;
+                }
+
+                // Fusionner intelligemment
+                const mergedProject = {
+                    ...p,
+                    // Garder les valeurs locales si elles sont supérieures (évite de perdre le travail)
+                    current_row: existing ? Math.max(existing.current_row || 0, p.current_row || 0) : (p.current_row || 0),
+                    total_duration: existing ? Math.max(existing.total_duration || 0, p.total_duration || 0) : (p.total_duration || 0),
+                    _syncStatus: 'synced' as const,
+                    _localUpdatedAt: Date.now(),
+                    _isLocal: false,
+                };
+                await tx.store.put(mergedProject);
             }
             await tx.done;
         }
@@ -520,24 +602,169 @@ export const localDb = {
         if (data.materials) {
             const tx = db.transaction('materials', 'readwrite');
             for (const m of data.materials) {
-                const existing = await tx.store.get(m.id);
-                if (!existing || existing._syncStatus === 'synced') {
-                    await tx.store.put({
-                        ...m,
-                        _syncStatus: 'synced',
-                        _localUpdatedAt: Date.now(),
-                        _isLocal: false,
-                    });
+                // Ne pas importer les matériaux supprimés localement
+                if (deletedMaterialIds.has(m.id)) {
+                    console.log(`⏭️ [LocalDB] Skipping deleted material: ${m.id}`);
+                    continue;
                 }
+
+                const existing = await tx.store.get(m.id);
+
+                // Comparer les timestamps
+                const remoteUpdated = new Date(m.updated_at || m.created_at).getTime();
+                const localUpdated = existing?._localUpdatedAt || 0;
+
+                if (existing && existing._syncStatus === 'pending' && localUpdated > remoteUpdated) {
+                    console.log(`⏭️ [LocalDB] Keeping local version of material: ${m.name}`);
+                    continue;
+                }
+
+                await tx.store.put({
+                    ...m,
+                    _syncStatus: 'synced',
+                    _localUpdatedAt: Date.now(),
+                    _isLocal: false,
+                });
             }
             await tx.done;
         }
 
         if (data.categories) {
-            await this.saveCategories(data.categories);
+            // Fusionner les catégories par LABEL (pas par ID) pour éviter les doublons
+            const existingCategories = await this.getAllCategories();
+            const existingByLabel = new Map<string, LocalCategory>();
+
+            // Indexer les catégories existantes par label
+            for (const cat of existingCategories) {
+                existingByLabel.set(cat.label.toLowerCase(), cat);
+            }
+
+            const mergedCategories: LocalCategory[] = [];
+            const processedLabels = new Set<string>();
+
+            // Priorité aux catégories serveur (UUIDs)
+            for (const remoteCat of data.categories) {
+                const labelKey = remoteCat.label.toLowerCase();
+                processedLabels.add(labelKey);
+
+                // Si une catégorie locale existe avec le même label, la remplacer par celle du serveur
+                const existingLocal = existingByLabel.get(labelKey);
+                if (existingLocal && existingLocal.id !== remoteCat.id) {
+                    console.log(`🔄 [LocalDB] Merging category: ${existingLocal.id} -> ${remoteCat.id} (${remoteCat.label})`);
+                }
+
+                mergedCategories.push({
+                    id: remoteCat.id,
+                    label: remoteCat.label,
+                    icon: remoteCat.icon
+                });
+            }
+
+            // Garder les catégories locales qui n'existent pas sur le serveur
+            for (const localCat of existingCategories) {
+                const labelKey = localCat.label.toLowerCase();
+                if (!processedLabels.has(labelKey)) {
+                    mergedCategories.push(localCat);
+                }
+            }
+
+            // Remplacer toutes les catégories
+            const tx = db.transaction('categories', 'readwrite');
+            await tx.store.clear();
+            for (const cat of mergedCategories) {
+                await tx.store.put(cat);
+            }
+            await tx.done;
+
+            console.log(`📥 [LocalDB] Categories merged: ${mergedCategories.length} total`);
         }
 
         console.log(`📥 [LocalDB] Imported data from API`);
+    },
+
+    // === DELETIONS (tracking pour sync) ===
+    async trackDeletion(entityType: LocalDeletion['entity_type'], entityId: string): Promise<void> {
+        try {
+            const db = await getDb();
+            if (!db.objectStoreNames.contains('deletions')) {
+                console.warn('[LocalDB] Deletions store not available yet');
+                return;
+            }
+            const deletion: LocalDeletion = {
+                id: `del-${entityType}-${entityId}`,
+                entity_type: entityType,
+                entity_id: entityId,
+                deleted_at: Date.now()
+            };
+            await db.put('deletions', deletion);
+            console.log(`🗑️ [LocalDB] Deletion tracked: ${entityType} ${entityId}`);
+        } catch (err) {
+            console.warn('[LocalDB] Could not track deletion:', err);
+        }
+    },
+
+    async getPendingDeletions(): Promise<LocalDeletion[]> {
+        try {
+            const db = await getDb();
+            if (!db.objectStoreNames.contains('deletions')) {
+                return [];
+            }
+            return db.getAll('deletions');
+        } catch (err) {
+            console.warn('[LocalDB] Could not get pending deletions:', err);
+            return [];
+        }
+    },
+
+    async getDeletionsByType(entityType: LocalDeletion['entity_type']): Promise<LocalDeletion[]> {
+        try {
+            const db = await getDb();
+            if (!db.objectStoreNames.contains('deletions')) {
+                return [];
+            }
+            return db.getAllFromIndex('deletions', 'by-entity', entityType);
+        } catch (err) {
+            console.warn('[LocalDB] Could not get deletions by type:', err);
+            return [];
+        }
+    },
+
+    async clearDeletion(id: string): Promise<void> {
+        try {
+            const db = await getDb();
+            if (!db.objectStoreNames.contains('deletions')) {
+                return;
+            }
+            await db.delete('deletions', id);
+        } catch (err) {
+            console.warn('[LocalDB] Could not clear deletion:', err);
+        }
+    },
+
+    async clearDeletionByEntity(entityType: LocalDeletion['entity_type'], entityId: string): Promise<void> {
+        try {
+            const db = await getDb();
+            if (!db.objectStoreNames.contains('deletions')) {
+                return;
+            }
+            await db.delete('deletions', `del-${entityType}-${entityId}`);
+        } catch (err) {
+            console.warn('[LocalDB] Could not clear deletion by entity:', err);
+        }
+    },
+
+    async isDeletedLocally(entityType: LocalDeletion['entity_type'], entityId: string): Promise<boolean> {
+        try {
+            const db = await getDb();
+            if (!db.objectStoreNames.contains('deletions')) {
+                return false;
+            }
+            const deletion = await db.get('deletions', `del-${entityType}-${entityId}`);
+            return !!deletion;
+        } catch (err) {
+            console.warn('[LocalDB] Could not check if deleted locally:', err);
+            return false;
+        }
     },
 
     // === DEBUG ===
@@ -569,11 +796,22 @@ export const localDb = {
         const pendingProjects = await this.getPendingProjects();
         const pendingMaterials = await this.getPendingMaterials();
         const pendingPhotos = await this.getPendingPhotos();
+        const pendingDeletions = await this.getPendingDeletions();
 
         console.log(`\n⏳ Pending sync:`);
         console.log(`   - Projects: ${pendingProjects.length}`);
         console.log(`   - Materials: ${pendingMaterials.length}`);
         console.log(`   - Photos: ${pendingPhotos.length}`);
+        console.log(`   - Deletions: ${pendingDeletions.length}`);
+
+        if (pendingDeletions.length > 0) {
+            console.log(`\n🗑️ Pending deletions:`);
+            console.table(pendingDeletions.map(d => ({
+                type: d.entity_type,
+                id: d.entity_id.substring(0, 15) + '...',
+                deleted_at: new Date(d.deleted_at).toISOString()
+            })));
+        }
 
         console.log('='.repeat(60));
     },
@@ -588,6 +826,9 @@ export const localDb = {
         await db.clear('photos');
         await db.clear('categories');
         await db.clear('metadata');
+        if (db.objectStoreNames.contains('deletions')) {
+            await db.clear('deletions');
+        }
         console.log('🗑️ [LocalDB] All data cleared');
     }
 };

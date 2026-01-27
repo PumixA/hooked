@@ -36,15 +36,9 @@ export default function MaterialCreate() {
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!formData.name && !formData.size) return;
+        if (!formData.name) return;
 
-        // Si pas de nom mais une taille, utiliser la taille comme nom
-        const materialData = {
-            ...formData,
-            name: formData.name || (formData.size ? `${formData.size}mm` : '')
-        };
-
-        createMaterialMutation.mutate(materialData, {
+        createMaterialMutation.mutate(formData, {
             onSuccess: () => {
                 navigate('/inventory');
             }
@@ -87,39 +81,31 @@ export default function MaterialCreate() {
                     </div>
                 </div>
 
-                {/* 2. Champs */}
-                {isYarn ? (
-                    <Input
-                        label="Nom / Couleur *"
-                        placeholder="Ex: Merino Rouge"
-                        value={formData.name}
-                        onChange={(e) => setFormData({...formData, name: e.target.value})}
-                        required
-                    />
-                ) : (
-                    <>
-                        <div className="space-y-2">
-                            <label className="text-xs text-zinc-400 ml-1">Taille (mm) *</label>
-                            <div className="relative">
-                                <input
-                                    type="text"
-                                    inputMode="decimal"
-                                    placeholder="Ex: 4"
-                                    value={formData.size}
-                                    onChange={handleSizeChange}
-                                    className="w-full p-4 pr-12 rounded-xl bg-secondary border border-zinc-800 text-white placeholder-zinc-500 focus:outline-none focus:border-primary transition-colors"
-                                    required
-                                />
-                                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500">mm</span>
-                            </div>
+                {/* 2. Nom (obligatoire) */}
+                <Input
+                    label="Nom *"
+                    placeholder={isYarn ? "Ex: Merino Rouge" : "Ex: Mon crochet préféré"}
+                    value={formData.name}
+                    onChange={(e) => setFormData({...formData, name: e.target.value})}
+                    required
+                />
+
+                {/* 3. Taille (optionnel, surtout pour crochets/aiguilles) */}
+                {!isYarn && (
+                    <div className="space-y-2">
+                        <label className="text-xs text-zinc-400 ml-1">Taille (mm)</label>
+                        <div className="relative">
+                            <input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="Ex: 4"
+                                value={formData.size}
+                                onChange={handleSizeChange}
+                                className="w-full p-4 pr-12 rounded-xl bg-secondary border border-zinc-800 text-white placeholder-zinc-500 focus:outline-none focus:border-primary transition-colors"
+                            />
+                            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500">mm</span>
                         </div>
-                        <Input
-                            label="Nom (optionnel)"
-                            placeholder="Ex: Mon crochet prefere"
-                            value={formData.name}
-                            onChange={(e) => setFormData({...formData, name: e.target.value})}
-                        />
-                    </>
+                    </div>
                 )}
 
                 <Input
@@ -141,7 +127,7 @@ export default function MaterialCreate() {
                     <Button
                         type="submit"
                         isLoading={createMaterialMutation.isPending}
-                        disabled={isYarn ? !formData.name : !formData.size}
+                        disabled={!formData.name}
                         className="w-full flex items-center justify-center gap-2"
                     >
                         {createMaterialMutation.isPending ? <Loader2 className="animate-spin" /> : <Save size={20} />}

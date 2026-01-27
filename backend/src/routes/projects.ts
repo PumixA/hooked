@@ -21,7 +21,7 @@ const updateProjectSchema = z.object({
     status: z.enum(['in_progress', 'completed', 'archived']).optional(),
     goal_rows: z.number().nullable().optional(),
     total_duration: z.number().optional(),
-    end_date: z.string().datetime().optional(),
+    end_date: z.string().datetime().nullable().optional(), // Permet null pour reprendre un projet
     updated_at: z.string().datetime().optional(),
     material_ids: z.array(z.string().uuid()).optional()
 });
@@ -173,7 +173,8 @@ export async function projectsRoutes(server: FastifyInstance) {
             await prisma.sessions.deleteMany({ where: { project_id: id } });
             await prisma.notes.deleteMany({ where: { project_id: id } });
             await prisma.photos.deleteMany({ where: { project_id: id } });
-            
+            await prisma.project_materials.deleteMany({ where: { project_id: id } });
+
             await prisma.projects.delete({ where: { id } });
             return reply.code(204).send();
         } catch (err) {

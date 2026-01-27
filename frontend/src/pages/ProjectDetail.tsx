@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings, TrendingUp, ImagePlus, Trash2, CheckCircle, Flag, X, ChevronLeft, ChevronRight, Check, Package } from 'lucide-react';
+import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings, TrendingUp, ImagePlus, Trash2, CheckCircle, Flag, X, ChevronLeft, ChevronRight, Check, Package, RotateCcw } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import Timer from '../components/features/Timer';
 import Modal from '../components/ui/Modal';
@@ -81,6 +81,7 @@ export default function ProjectDetail() {
     const [showSettings, setShowSettings] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [showFinishConfirm, setShowFinishConfirm] = useState(false);
+    const [showResumeConfirm, setShowResumeConfirm] = useState(false);
     const [toastMessage, setToastMessage] = useState<string | null>(null);
 
     const [selectedPhotoIndex, setSelectedPhotoIndex] = useState<number | null>(null);
@@ -318,12 +319,22 @@ export default function ProjectDetail() {
             if (isActive) startTimeRef.current = Date.now();
         }
 
-        updateProjectMutation.mutate({
+        // Si le projet est terminé et qu'on augmente l'objectif au-delà du nombre de rangs actuel,
+        // remettre automatiquement le projet en cours
+        const updates: any = {
             id,
             title: tempTitle,
             goal_rows: newGoal,
             total_duration: newElapsed
-        });
+        };
+
+        if (project.status === 'completed' && newGoal && newGoal > (project.current_row || 0)) {
+            updates.status = 'in_progress';
+            updates.end_date = undefined;
+            setToastMessage("Projet repris automatiquement !");
+        }
+
+        updateProjectMutation.mutate(updates);
         setShowSettings(false);
     };
 
@@ -345,6 +356,18 @@ export default function ProjectDetail() {
             end_date: new Date().toISOString()
         });
         setShowFinishConfirm(false);
+    };
+
+    const handleResumeProject = () => {
+        if (!project || !id) return;
+
+        updateProjectMutation.mutate({
+            id,
+            status: 'in_progress',
+            end_date: undefined
+        });
+        setShowResumeConfirm(false);
+        setToastMessage("Projet repris !");
     };
 
     // Gestion des matériaux
@@ -464,7 +487,11 @@ export default function ProjectDetail() {
                 </h1>
 
                 <div className="flex justify-end gap-1">
-                    {!isCompleted && (
+                    {isCompleted ? (
+                        <button onClick={() => setShowResumeConfirm(true)} className="p-2 rounded-full bg-zinc-800 text-amber-400 hover:text-amber-300 transition">
+                            <RotateCcw size={18} />
+                        </button>
+                    ) : (
                         <button onClick={() => setShowFinishConfirm(true)} className="p-2 rounded-full bg-zinc-800 text-green-400 hover:text-green-300 transition">
                             <Flag size={18} />
                         </button>
@@ -582,6 +609,16 @@ export default function ProjectDetail() {
                     <div className="flex gap-3 mt-6">
                         <Button variant="secondary" onClick={() => setShowFinishConfirm(false)} className="flex-1">Annuler</Button>
                         <Button onClick={handleFinishProject} className="flex-1 bg-green-500 hover:bg-green-600 text-white">Oui, terminé !</Button>
+                    </div>
+                </div>
+            </Modal>
+
+            <Modal isOpen={showResumeConfirm} onClose={() => setShowResumeConfirm(false)} title="Reprendre le projet ?">
+                <div className="space-y-4 text-center">
+                    <p className="text-zinc-400">Ce projet sera remis en cours.<br/>Vous pourrez continuer à ajouter des rangs.</p>
+                    <div className="flex gap-3 mt-6">
+                        <Button variant="secondary" onClick={() => setShowResumeConfirm(false)} className="flex-1">Annuler</Button>
+                        <Button onClick={handleResumeProject} className="flex-1 bg-amber-500 hover:bg-amber-600 text-white">Reprendre</Button>
                     </div>
                 </div>
             </Modal>
