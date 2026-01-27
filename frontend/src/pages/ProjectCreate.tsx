@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Loader2, WifiOff } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
-import { useCreateProject, useCategories } from '../hooks/useOfflineData';
+import { useCreateProject, useCategories, useMaterials } from '../hooks/useOfflineData';
 
 export default function ProjectCreate() {
     const navigate = useNavigate();
@@ -12,27 +12,12 @@ export default function ProjectCreate() {
     const [title, setTitle] = useState('');
     const [goalRows, setGoalRows] = useState('');
     const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
-    const [selectedHookSize, setSelectedHookSize] = useState<string>("");
+    const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
 
-    // État de connexion
-    const [isOnline, setIsOnline] = useState(navigator.onLine);
-
-    useEffect(() => {
-        const handleOnline = () => setIsOnline(true);
-        const handleOffline = () => setIsOnline(false);
-        window.addEventListener('online', handleOnline);
-        window.addEventListener('offline', handleOffline);
-        return () => {
-            window.removeEventListener('online', handleOnline);
-            window.removeEventListener('offline', handleOffline);
-        };
-    }, []);
-
-    // 🔥 OFFLINE-FIRST: Utilisation des hooks locaux
+    // OFFLINE-FIRST: Utilisation des hooks locaux
     const { data: categories = [], isLoading: isLoadingCategories } = useCategories();
+    const { data: materials = [], isLoading: isLoadingMaterials } = useMaterials();
     const createProjectMutation = useCreateProject();
-
-    const hookSizes = ["2.0mm", "2.5mm", "3.0mm", "3.5mm", "4.0mm", "4.5mm", "5.0mm", "5.5mm", "6.0mm"];
 
     // Gestion de l'input numérique strict
     const handleGoalRowsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -40,6 +25,14 @@ export default function ProjectCreate() {
         if (value === '' || /^\d+$/.test(value)) {
             setGoalRows(value);
         }
+    };
+
+    const toggleMaterial = (materialId: string) => {
+        setSelectedMaterialIds(prev =>
+            prev.includes(materialId)
+                ? prev.filter(id => id !== materialId)
+                : [...prev, materialId]
+        );
     };
 
     const handleSubmit = async (e?: React.FormEvent) => {
@@ -51,6 +44,7 @@ export default function ProjectCreate() {
                 title,
                 category_id: selectedCategoryId || undefined,
                 goal_rows: goalRows ? parseInt(goalRows) : undefined,
+                material_ids: selectedMaterialIds.length > 0 ? selectedMaterialIds : undefined,
             },
             {
                 onSuccess: (project) => {
@@ -58,6 +52,16 @@ export default function ProjectCreate() {
                 }
             }
         );
+    };
+
+    // Helpers pour l'affichage des matériaux
+    const getIcon = (type: string) => {
+        switch(type) {
+            case 'hook': return '🪄';
+            case 'yarn': return '🧶';
+            case 'needle': return '🥢';
+            default: return '📦';
+        }
     };
 
     return (
@@ -79,14 +83,6 @@ export default function ProjectCreate() {
             {/* --- CONTENU SCROLLABLE --- */}
             <div className="flex-1 overflow-y-auto pt-20 px-4 pb-8">
 
-                {/* Indicateur de statut de connexion */}
-                {!isOnline && (
-                    <div className="mb-6 p-3 bg-yellow-900/30 border border-yellow-600/50 rounded-lg text-yellow-200 text-sm flex items-center gap-2">
-                        <WifiOff size={16} />
-                        Mode hors ligne - Votre projet sera synchronisé automatiquement
-                    </div>
-                )}
-
                 <h1 className="text-3xl font-bold mb-2">Nouveau projet</h1>
                 <p className="text-zinc-500 mb-8">Créez un nouveau projet de crochet</p>
 
@@ -107,7 +103,7 @@ export default function ProjectCreate() {
 
                         {isLoadingCategories ? (
                             <div className="flex gap-2 text-zinc-500 text-sm items-center">
-                                <Loader2 className="animate-spin" size={16} /> Chargement des catégories...
+                                <Loader2 className="animate-spin" size={16} /> Chargement...
                             </div>
                         ) : categories.length === 0 ? (
                             <p className="text-zinc-500 text-sm">Aucune catégorie disponible</p>
@@ -131,24 +127,35 @@ export default function ProjectCreate() {
                         )}
                     </div>
 
-                    {/* 3. Taille du crochet */}
-                    <div className="space-y-2">
-                        <label className="text-xs text-zinc-400 ml-1 uppercase tracking-wider font-bold">Taille du crochet</label>
-                        <div className="relative">
-                            <select
-                                className="w-full p-4 rounded-xl bg-secondary border border-zinc-800 text-white focus:outline-none focus:border-primary appearance-none transition-colors"
-                                value={selectedHookSize}
-                                onChange={(e) => setSelectedHookSize(e.target.value)}
-                            >
-                                <option value="" className="text-zinc-500">Non spécifié</option>
-                                {hookSizes.map(size => (
-                                    <option key={size} value={size}>{size}</option>
-                                ))}
-                            </select>
-                            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-500">
-                                ▼
+                    {/* 3. Matériaux */}
+                    <div className="space-y-3">
+                        <label className="text-xs text-zinc-400 ml-1 uppercase tracking-wider font-bold">Matériaux utilisés</label>
+
+                        {isLoadingMaterials ? (
+                            <div className="flex gap-2 text-zinc-500 text-sm items-center">
+                                <Loader2 className="animate-spin" size={16} /> Chargement...
                             </div>
-                        </div>
+                        ) : materials.length === 0 ? (
+                            <p className="text-zinc-500 text-sm">Aucun matériel dans l'inventaire</p>
+                        ) : (
+                            <div className="flex flex-wrap gap-2">
+                                {materials.map((mat) => (
+                                    <button
+                                        key={mat.id}
+                                        type="button"
+                                        onClick={() => toggleMaterial(mat.id)}
+                                        className={`px-3 py-2 rounded-xl text-sm font-medium border transition-all flex items-center gap-2 ${
+                                            selectedMaterialIds.includes(mat.id)
+                                                ? "bg-secondary border-primary text-white shadow-[0_0_10px_-3px_rgba(196,181,254,0.5)]"
+                                                : "bg-zinc-800/50 border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:bg-zinc-800"
+                                        }`}
+                                    >
+                                        <span>{getIcon(mat.category_type)}</span>
+                                        <span>{mat.name}</span>
+                                    </button>
+                                ))}
+                            </div>
+                        )}
                     </div>
 
                     {/* 4. Nombre de rangs */}
@@ -174,12 +181,7 @@ export default function ProjectCreate() {
                         disabled={!title || createProjectMutation.isPending}
                         className="w-full py-4 text-lg shadow-lg shadow-primary/20"
                     >
-                        {createProjectMutation.isPending
-                            ? 'Création...'
-                            : isOnline
-                                ? 'Commencer le projet'
-                                : 'Créer hors ligne'
-                        }
+                        {createProjectMutation.isPending ? 'Création...' : 'Commencer le projet'}
                     </Button>
 
                 </form>

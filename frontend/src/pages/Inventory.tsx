@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Loader2, PackageOpen, WifiOff, Trash2 } from 'lucide-react';
+import { Plus, Loader2, PackageOpen, Trash2 } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Modal from '../components/ui/Modal';
 import Button from '../components/ui/Button';
@@ -19,20 +19,6 @@ export default function Inventory() {
     const navigate = useNavigate();
     const [filter, setFilter] = useState<string>('all');
     const [itemToDelete, setItemToDelete] = useState<Material | null>(null);
-
-    // État de connexion
-    const [isOnline, setIsOnline] = useState(navigator.onLine);
-
-    useEffect(() => {
-        const handleOnline = () => setIsOnline(true);
-        const handleOffline = () => setIsOnline(false);
-        window.addEventListener('online', handleOnline);
-        window.addEventListener('offline', handleOffline);
-        return () => {
-            window.removeEventListener('online', handleOnline);
-            window.removeEventListener('offline', handleOffline);
-        };
-    }, []);
 
     // 🔥 OFFLINE-FIRST: Utilisation des hooks locaux
     const { data: materials = [], isLoading, isError } = useMaterials();
@@ -56,8 +42,6 @@ export default function Inventory() {
         filter === 'all' ? true : m.category_type === filter
     );
 
-    // Compter les éléments en attente de sync
-    const pendingCount = materials.filter(m => m._syncStatus === 'pending').length;
 
     // Helpers UI
     const getCategoryLabel = (type: string) => {
@@ -97,8 +81,8 @@ export default function Inventory() {
 
     if (isError && materials.length === 0) return (
         <div className="h-screen flex flex-col items-center justify-center text-zinc-500 bg-background gap-4 p-4 text-center">
-            <WifiOff size={48} />
-            <p className="text-lg font-medium">Oups, pas de connexion.</p>
+            <PackageOpen size={48} />
+            <p className="text-lg font-medium">Erreur de chargement</p>
             <p className="text-sm">Impossible de charger l'inventaire pour le moment.</p>
             <button
                 onClick={() => window.location.reload()}
@@ -115,18 +99,6 @@ export default function Inventory() {
             {/* Header */}
             <div className="flex justify-between items-center mb-6">
                 <h1 className="text-2xl font-bold">Inventaire</h1>
-                <div className="flex items-center gap-2">
-                    {!isOnline && (
-                        <span className="text-[10px] bg-orange-500/20 text-orange-400 px-2 py-1 rounded-full border border-orange-500/50 flex items-center gap-1">
-                            <WifiOff size={12} /> Hors ligne
-                        </span>
-                    )}
-                    {pendingCount > 0 && (
-                        <span className="text-[10px] bg-yellow-500/20 text-yellow-400 px-2 py-1 rounded-full">
-                            {pendingCount} en attente
-                        </span>
-                    )}
-                </div>
             </div>
 
             {/* Filtres */}
@@ -166,10 +138,6 @@ export default function Inventory() {
                             onClick={() => navigate(`/inventory/${item.id}`)}
                             className="flex items-center justify-between p-4 group bg-secondary border-zinc-800 cursor-pointer active:scale-[0.98] transition-transform relative"
                         >
-                            {/* Indicateur de sync */}
-                            {item._syncStatus === 'pending' && (
-                                <div className="absolute top-2 right-2 w-2 h-2 bg-yellow-400 rounded-full" title="Non synchronisé" />
-                            )}
                             <div className="flex items-center gap-4">
                                 <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl bg-zinc-800`}>
                                     {getIcon(item.category_type)}

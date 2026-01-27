@@ -17,6 +17,7 @@ export interface LocalProject {
     total_duration?: number;
     status: string;
     category_id?: string;
+    material_ids?: string[]; // IDs des matériaux associés
     created_at: string;
     updated_at: string;
     end_date?: string;
@@ -30,6 +31,7 @@ export interface LocalMaterial {
     id: string;
     category_type: 'hook' | 'yarn' | 'needle';
     name: string;
+    size?: string;
     brand?: string;
     material_composition?: string;
     created_at: string;
@@ -216,6 +218,7 @@ export const localDb = {
             total_duration: project.total_duration ?? existing?.total_duration ?? 0,
             status: project.status || existing?.status || 'in_progress',
             category_id: project.category_id ?? existing?.category_id,
+            material_ids: project.material_ids ?? existing?.material_ids,
             created_at: existing?.created_at || project.created_at || new Date().toISOString(),
             updated_at: new Date().toISOString(),
             end_date: project.end_date ?? existing?.end_date,
@@ -284,6 +287,7 @@ export const localDb = {
             id: material.id,
             category_type: material.category_type || existing?.category_type || 'hook',
             name: material.name || existing?.name || '',
+            size: material.size ?? existing?.size,
             brand: material.brand ?? existing?.brand,
             material_composition: material.material_composition ?? existing?.material_composition,
             created_at: existing?.created_at || material.created_at || new Date().toISOString(),

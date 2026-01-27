@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings, TrendingUp, ImagePlus, WifiOff, Trash2, CheckCircle, Flag, X, ChevronLeft, ChevronRight, Check } from 'lucide-react';
+import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings, TrendingUp, ImagePlus, Trash2, CheckCircle, Flag, X, ChevronLeft, ChevronRight, Check, Package } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import Timer from '../components/features/Timer';
 import Modal from '../components/ui/Modal';
@@ -16,7 +16,8 @@ import {
     usePhotos,
     useUploadPhoto,
     useDeletePhoto,
-    useSaveSession
+    useSaveSession,
+    useMaterials
 } from '../hooks/useOfflineData';
 
 interface Photo {
@@ -46,24 +47,11 @@ export default function ProjectDetail() {
     const navigate = useNavigate();
     const queryClient = useQueryClient();
 
-    // État de connexion
-    const [isOnline, setIsOnline] = useState(navigator.onLine);
-
-    useEffect(() => {
-        const handleOnline = () => setIsOnline(true);
-        const handleOffline = () => setIsOnline(false);
-        window.addEventListener('online', handleOnline);
-        window.addEventListener('offline', handleOffline);
-        return () => {
-            window.removeEventListener('online', handleOnline);
-            window.removeEventListener('offline', handleOffline);
-        };
-    }, []);
-
-    // 🔥 OFFLINE-FIRST: Utilisation des hooks locaux
+    // OFFLINE-FIRST: Utilisation des hooks locaux
     const { data: project, isLoading } = useProject(id);
     const { data: noteData } = useNote(id);
     const { data: photos = [] } = usePhotos(id);
+    const { data: allMaterials = [] } = useMaterials();
 
     const updateProjectMutation = useUpdateProject();
     const deleteProjectMutation = useDeleteProject();
@@ -102,6 +90,8 @@ export default function ProjectDetail() {
     const [isSelectionMode, setIsSelectionMode] = useState(false);
     const [selectedPhotoIds, setSelectedPhotoIds] = useState<Set<string>>(new Set());
     const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+    const [showMaterials, setShowMaterials] = useState(false);
+    const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
     const photoLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const [tempGoal, setTempGoal] = useState<string>('');
@@ -113,6 +103,7 @@ export default function ProjectDetail() {
         if (project) {
             setTempGoal(project.goal_rows ? project.goal_rows.toString() : '');
             setTempTitle(project.title);
+            setSelectedMaterialIds(project.material_ids || []);
         }
     }, [project]);
 
@@ -356,6 +347,36 @@ export default function ProjectDetail() {
         setShowFinishConfirm(false);
     };
 
+    // Gestion des matériaux
+    const toggleMaterial = (materialId: string) => {
+        setSelectedMaterialIds(prev =>
+            prev.includes(materialId)
+                ? prev.filter(id => id !== materialId)
+                : [...prev, materialId]
+        );
+    };
+
+    const handleSaveMaterials = () => {
+        if (!id) return;
+        updateProjectMutation.mutate({
+            id,
+            material_ids: selectedMaterialIds
+        });
+        setShowMaterials(false);
+    };
+
+    const getIcon = (type: string) => {
+        switch(type) {
+            case 'hook': return '🪄';
+            case 'yarn': return '🧶';
+            case 'needle': return '🥢';
+            default: return '📦';
+        }
+    };
+
+    // Matériaux liés au projet
+    const projectMaterials = allMaterials.filter(m => selectedMaterialIds.includes(m.id));
+
     const handleSaveNote = () => {
         if (!id) return;
         saveNoteMutation.mutate(
@@ -422,7 +443,6 @@ export default function ProjectDetail() {
     }
 
     const estimation = getEstimation();
-    const isOfflineProject = id?.startsWith('local-');
     const isCompleted = project.status === 'completed';
     const currentRowDisplay = project.current_row || 0;
     const API_URL = 'http://192.168.1.96:3000';
@@ -443,13 +463,7 @@ export default function ProjectDetail() {
                     {isCompleted && <CheckCircle size={16} className="text-green-400" />}
                 </h1>
 
-                <div className="w-12 flex justify-end gap-2">
-                    {(isOfflineProject || !isOnline || project._syncStatus === 'pending') && (
-                        <span className="text-[10px] bg-orange-500/20 text-orange-400 px-1 py-1 rounded-full border border-orange-500/50 flex items-center gap-1">
-                            <WifiOff size={10} />
-                        </span>
-                    )}
-
+                <div className="flex justify-end gap-1">
                     {!isCompleted && (
                         <button onClick={() => setShowFinishConfirm(true)} className="p-2 rounded-full bg-zinc-800 text-green-400 hover:text-green-300 transition">
                             <Flag size={18} />
@@ -514,7 +528,7 @@ export default function ProjectDetail() {
                 </div>
 
                 <div className="shrink-0 bg-background border-t border-zinc-800/30 px-6 py-2">
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-3 gap-3">
                         <button onClick={() => setShowNotes(true)} className="flex flex-col items-center justify-center gap-0.5 bg-zinc-800/50 border border-zinc-700/50 rounded-xl text-zinc-400 hover:bg-zinc-800 hover:text-white transition h-12">
                             <StickyNote size={16} />
                             <span className="text-[9px]">Notes</span>
@@ -522,6 +536,15 @@ export default function ProjectDetail() {
                         <button onClick={() => setShowPhotos(true)} className="flex flex-col items-center justify-center gap-0.5 bg-zinc-800/50 border border-zinc-700/50 rounded-xl text-zinc-400 hover:bg-zinc-800 hover:text-white transition h-12">
                             <Camera size={16} />
                             <span className="text-[9px]">Photos</span>
+                        </button>
+                        <button onClick={() => setShowMaterials(true)} className="flex flex-col items-center justify-center gap-0.5 bg-zinc-800/50 border border-zinc-700/50 rounded-xl text-zinc-400 hover:bg-zinc-800 hover:text-white transition h-12 relative">
+                            <Package size={16} />
+                            <span className="text-[9px]">Matériaux</span>
+                            {projectMaterials.length > 0 && (
+                                <span className="absolute -top-1 -right-1 w-4 h-4 bg-primary text-background text-[8px] font-bold rounded-full flex items-center justify-center">
+                                    {projectMaterials.length}
+                                </span>
+                            )}
                         </button>
                     </div>
                 </div>
@@ -634,11 +657,6 @@ export default function ProjectDetail() {
                                         <div className="bg-primary text-white rounded-full p-1"><Check size={24} strokeWidth={3} /></div>
                                     </div>
                                 )}
-                                {photo._isLocal && (
-                                    <div className="absolute bottom-1 right-1 bg-orange-500/80 text-white text-[10px] px-1.5 py-0.5 rounded-full flex items-center gap-1">
-                                        <WifiOff size={8} /> Local
-                                    </div>
-                                )}
                             </div>
                         );
                     })}
@@ -685,6 +703,42 @@ export default function ProjectDetail() {
                         <Button variant="secondary" onClick={() => setShowBulkDeleteConfirm(false)} className="flex-1">Annuler</Button>
                         <Button variant="danger" onClick={handleBulkDeletePhotos} className="flex-1">Supprimer tout</Button>
                     </div>
+                </div>
+            </Modal>
+
+            <Modal isOpen={showMaterials} onClose={() => setShowMaterials(false)} title="Matériaux">
+                <div className="space-y-4">
+                    {allMaterials.length === 0 ? (
+                        <div className="text-center py-8 text-zinc-500">
+                            <Package size={48} className="mx-auto mb-3 opacity-50" />
+                            <p>Aucun matériel dans l'inventaire</p>
+                            <p className="text-xs mt-1">Ajoutez des matériaux depuis l'inventaire</p>
+                        </div>
+                    ) : (
+                        <>
+                            <p className="text-xs text-zinc-400">Sélectionnez les matériaux utilisés pour ce projet</p>
+                            <div className="flex flex-wrap gap-2 max-h-[40vh] overflow-y-auto">
+                                {allMaterials.map((mat) => (
+                                    <button
+                                        key={mat.id}
+                                        type="button"
+                                        onClick={() => toggleMaterial(mat.id)}
+                                        className={`px-3 py-2 rounded-xl text-sm font-medium border transition-all flex items-center gap-2 ${
+                                            selectedMaterialIds.includes(mat.id)
+                                                ? "bg-secondary border-primary text-white shadow-[0_0_10px_-3px_rgba(196,181,254,0.5)]"
+                                                : "bg-zinc-800/50 border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:bg-zinc-800"
+                                        }`}
+                                    >
+                                        <span>{getIcon(mat.category_type)}</span>
+                                        <span>{mat.name}</span>
+                                    </button>
+                                ))}
+                            </div>
+                            <Button onClick={handleSaveMaterials} className="w-full mt-4">
+                                Enregistrer
+                            </Button>
+                        </>
+                    )}
                 </div>
             </Modal>
         </div>

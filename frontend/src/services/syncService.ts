@@ -182,6 +182,15 @@ class SyncService {
                         }
                     }
 
+                    // Ajouter les material_ids s'ils existent (deja en UUID cote serveur)
+                    if (project.material_ids && project.material_ids.length > 0) {
+                        // Filtrer uniquement les UUIDs valides (pas les IDs locaux)
+                        const validMaterialIds = project.material_ids.filter(id => isValidUuid(id));
+                        if (validMaterialIds.length > 0) {
+                            createData.material_ids = validMaterialIds;
+                        }
+                    }
+
                     console.log('[Sync] Creation projet:', createData);
                     const response = await api.post('/projects', createData);
                     const serverId = response.data.id;
@@ -205,6 +214,11 @@ class SyncService {
                     };
                     if (project.end_date) {
                         updateData.end_date = project.end_date;
+                    }
+                    // Ajouter les material_ids s'ils existent
+                    if (project.material_ids) {
+                        const validMaterialIds = project.material_ids.filter(id => isValidUuid(id));
+                        updateData.material_ids = validMaterialIds;
                     }
 
                     await api.patch(`/projects/${project.id}`, updateData);
@@ -230,6 +244,7 @@ class SyncService {
                     const createData = {
                         category_type: material.category_type,
                         name: material.name,
+                        size: material.size,
                         brand: material.brand,
                         material_composition: material.material_composition,
                     };
@@ -240,6 +255,7 @@ class SyncService {
                     const updateData = {
                         category_type: material.category_type,
                         name: material.name,
+                        size: material.size,
                         brand: material.brand,
                         material_composition: material.material_composition,
                     };

@@ -1,26 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Loader2, Save, WifiOff } from 'lucide-react';
+import { ArrowLeft, Loader2, Save } from 'lucide-react';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import { useCreateMaterial } from '../hooks/useOfflineData';
 
 export default function MaterialCreate() {
     const navigate = useNavigate();
-
-    // État de connexion
-    const [isOnline, setIsOnline] = useState(navigator.onLine);
-
-    useEffect(() => {
-        const handleOnline = () => setIsOnline(true);
-        const handleOffline = () => setIsOnline(false);
-        window.addEventListener('online', handleOnline);
-        window.addEventListener('offline', handleOffline);
-        return () => {
-            window.removeEventListener('online', handleOnline);
-            window.removeEventListener('offline', handleOffline);
-        };
-    }, []);
 
     const types = [
         { label: 'Crochets', value: 'hook' },
@@ -31,23 +17,41 @@ export default function MaterialCreate() {
     const [formData, setFormData] = useState({
         category_type: 'hook',
         name: '',
+        size: '',
         brand: '',
         material_composition: ''
     });
 
-    // 🔥 OFFLINE-FIRST: Utilisation du hook local
+    // OFFLINE-FIRST: Utilisation du hook local
     const createMaterialMutation = useCreateMaterial();
+
+    // Validation taille: seulement des chiffres (max 1 chiffre apres la virgule)
+    const handleSizeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const value = e.target.value;
+        // Accepter: vide, chiffres, un point/virgule suivi d'un chiffre max
+        if (value === '' || /^\d{1,2}([.,]\d?)?$/.test(value)) {
+            setFormData({...formData, size: value.replace(',', '.')});
+        }
+    };
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!formData.name) return;
+        if (!formData.name && !formData.size) return;
 
-        createMaterialMutation.mutate(formData, {
+        // Si pas de nom mais une taille, utiliser la taille comme nom
+        const materialData = {
+            ...formData,
+            name: formData.name || (formData.size ? `${formData.size}mm` : '')
+        };
+
+        createMaterialMutation.mutate(materialData, {
             onSuccess: () => {
                 navigate('/inventory');
             }
         });
     };
+
+    const isYarn = formData.category_type === 'yarn';
 
     return (
         <div className="min-h-screen bg-background p-4 text-white animate-fade-in pb-20">
@@ -58,11 +62,6 @@ export default function MaterialCreate() {
                     <ArrowLeft size={24} />
                 </button>
                 <h1 className="text-xl font-bold">Nouveau matériel</h1>
-                {!isOnline && (
-                    <span className="text-[10px] bg-orange-500/20 text-orange-400 px-2 py-1 rounded-full border border-orange-500/50 flex items-center gap-1 ml-auto">
-                        <WifiOff size={12} /> Hors ligne
-                    </span>
-                )}
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-6 max-w-md mx-auto">
@@ -89,13 +88,39 @@ export default function MaterialCreate() {
                 </div>
 
                 {/* 2. Champs */}
-                <Input
-                    label={formData.category_type === 'yarn' ? "Nom / Couleur *" : "Taille (ex: 4.0mm) *"}
-                    placeholder={formData.category_type === 'yarn' ? "Ex: Merino Rouge" : "Ex: 4.0mm"}
-                    value={formData.name}
-                    onChange={(e) => setFormData({...formData, name: e.target.value})}
-                    required
-                />
+                {isYarn ? (
+                    <Input
+                        label="Nom / Couleur *"
+                        placeholder="Ex: Merino Rouge"
+                        value={formData.name}
+                        onChange={(e) => setFormData({...formData, name: e.target.value})}
+                        required
+                    />
+                ) : (
+                    <>
+                        <div className="space-y-2">
+                            <label className="text-xs text-zinc-400 ml-1">Taille (mm) *</label>
+                            <div className="relative">
+                                <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    placeholder="Ex: 4"
+                                    value={formData.size}
+                                    onChange={handleSizeChange}
+                                    className="w-full p-4 pr-12 rounded-xl bg-secondary border border-zinc-800 text-white placeholder-zinc-500 focus:outline-none focus:border-primary transition-colors"
+                                    required
+                                />
+                                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500">mm</span>
+                            </div>
+                        </div>
+                        <Input
+                            label="Nom (optionnel)"
+                            placeholder="Ex: Mon crochet prefere"
+                            value={formData.name}
+                            onChange={(e) => setFormData({...formData, name: e.target.value})}
+                        />
+                    </>
+                )}
 
                 <Input
                     label="Marque"
@@ -116,11 +141,11 @@ export default function MaterialCreate() {
                     <Button
                         type="submit"
                         isLoading={createMaterialMutation.isPending}
-                        disabled={!formData.name}
+                        disabled={isYarn ? !formData.name : !formData.size}
                         className="w-full flex items-center justify-center gap-2"
                     >
                         {createMaterialMutation.isPending ? <Loader2 className="animate-spin" /> : <Save size={20} />}
-                        <span>{isOnline ? 'Ajouter au stock' : 'Ajouter hors ligne'}</span>
+                        <span>Ajouter au stock</span>
                     </Button>
                 </div>
 

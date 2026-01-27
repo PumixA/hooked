@@ -46,13 +46,14 @@ export function useCreateProject() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: async (data: { title: string; goal_rows?: number; category_id?: string }) => {
+        mutationFn: async (data: { title: string; goal_rows?: number; category_id?: string; material_ids?: string[] }) => {
             const id = generateLocalId();
             const project = await localDb.saveProject({
                 id,
                 title: data.title,
                 goal_rows: data.goal_rows,
                 category_id: data.category_id,
+                material_ids: data.material_ids,
                 current_row: 0,
                 status: 'in_progress',
                 _isLocal: true,
@@ -144,12 +145,13 @@ export function useCreateMaterial() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: async (data: { category_type: string; name: string; brand?: string; material_composition?: string }) => {
+        mutationFn: async (data: { category_type: string; name: string; size?: string; brand?: string; material_composition?: string }) => {
             const id = generateLocalId();
             const material = await localDb.saveMaterial({
                 id,
                 category_type: data.category_type as any,
                 name: data.name,
+                size: data.size,
                 brand: data.brand,
                 material_composition: data.material_composition,
                 _isLocal: true,

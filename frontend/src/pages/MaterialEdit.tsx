@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Loader2, Save, WifiOff } from 'lucide-react';
+import { ArrowLeft, Loader2, Save } from 'lucide-react';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import { useMaterial, useUpdateMaterial } from '../hooks/useOfflineData';
@@ -8,6 +8,7 @@ import { useMaterial, useUpdateMaterial } from '../hooks/useOfflineData';
 interface MaterialForm {
     category_type: 'hook' | 'yarn' | 'needle';
     name: string;
+    size?: string;
     brand?: string;
     material_composition?: string;
 }
@@ -18,21 +19,7 @@ export default function MaterialEdit() {
 
     const [formData, setFormData] = useState<MaterialForm | null>(null);
 
-    // État de connexion
-    const [isOnline, setIsOnline] = useState(navigator.onLine);
-
-    useEffect(() => {
-        const handleOnline = () => setIsOnline(true);
-        const handleOffline = () => setIsOnline(false);
-        window.addEventListener('online', handleOnline);
-        window.addEventListener('offline', handleOffline);
-        return () => {
-            window.removeEventListener('online', handleOnline);
-            window.removeEventListener('offline', handleOffline);
-        };
-    }, []);
-
-    // 🔥 OFFLINE-FIRST: Utilisation des hooks locaux
+    // OFFLINE-FIRST: Utilisation des hooks locaux
     const { data: material, isLoading: isLoadingMaterial, isError } = useMaterial(id);
     const updateMutation = useUpdateMaterial();
 
@@ -42,24 +29,42 @@ export default function MaterialEdit() {
             setFormData({
                 category_type: material.category_type,
                 name: material.name,
+                size: material.size,
                 brand: material.brand,
                 material_composition: material.material_composition
             });
         }
     }, [material]);
 
+    // Validation taille: seulement des chiffres (max 1 chiffre apres la virgule)
+    const handleSizeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (!formData) return;
+        const value = e.target.value;
+        if (value === '' || /^\d{1,2}([.,]\d?)?$/.test(value)) {
+            setFormData({...formData, size: value.replace(',', '.')});
+        }
+    };
+
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!formData || !formData.name || !id) return;
+        if (!formData || !id) return;
 
-        updateMutation.mutate(
-            { id, ...formData },
-            {
-                onSuccess: () => {
-                    navigate('/inventory');
-                }
+        const isYarn = formData.category_type === 'yarn';
+        if (isYarn && !formData.name) return;
+        if (!isYarn && !formData.size) return;
+
+        // Si pas de nom mais une taille, utiliser la taille comme nom
+        const materialData = {
+            id,
+            ...formData,
+            name: formData.name || (formData.size ? `${formData.size}mm` : '')
+        };
+
+        updateMutation.mutate(materialData, {
+            onSuccess: () => {
+                navigate('/inventory');
             }
-        );
+        });
     };
 
     const types: { label: string; value: 'hook' | 'yarn' | 'needle' }[] = [
@@ -90,6 +95,8 @@ export default function MaterialEdit() {
         );
     }
 
+    const isYarn = formData.category_type === 'yarn';
+
     return (
         <div className="min-h-screen bg-background p-4 text-white animate-fade-in pb-20">
             <div className="flex items-center gap-4 mb-6">
@@ -97,11 +104,6 @@ export default function MaterialEdit() {
                     <ArrowLeft size={24} />
                 </button>
                 <h1 className="text-xl font-bold">Modifier le matériel</h1>
-                {!isOnline && (
-                    <span className="text-[10px] bg-orange-500/20 text-orange-400 px-2 py-1 rounded-full border border-orange-500/50 flex items-center gap-1 ml-auto">
-                        <WifiOff size={12} /> Hors ligne
-                    </span>
-                )}
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-6 max-w-md mx-auto">
@@ -125,12 +127,37 @@ export default function MaterialEdit() {
                     </div>
                 </div>
 
-                <Input
-                    label={formData.category_type === 'yarn' ? "Nom / Couleur *" : "Taille (ex: 4.0mm) *"}
-                    value={formData.name}
-                    onChange={(e) => setFormData({...formData, name: e.target.value})}
-                    required
-                />
+                {isYarn ? (
+                    <Input
+                        label="Nom / Couleur *"
+                        value={formData.name}
+                        onChange={(e) => setFormData({...formData, name: e.target.value})}
+                        required
+                    />
+                ) : (
+                    <>
+                        <div className="space-y-2">
+                            <label className="text-xs text-zinc-400 ml-1">Taille (mm) *</label>
+                            <div className="relative">
+                                <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    placeholder="Ex: 4"
+                                    value={formData.size || ''}
+                                    onChange={handleSizeChange}
+                                    className="w-full p-4 pr-12 rounded-xl bg-secondary border border-zinc-800 text-white placeholder-zinc-500 focus:outline-none focus:border-primary transition-colors"
+                                    required
+                                />
+                                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500">mm</span>
+                            </div>
+                        </div>
+                        <Input
+                            label="Nom (optionnel)"
+                            value={formData.name}
+                            onChange={(e) => setFormData({...formData, name: e.target.value})}
+                        />
+                    </>
+                )}
 
                 <Input
                     label="Marque"
@@ -148,7 +175,7 @@ export default function MaterialEdit() {
                     <Button
                         type="submit"
                         isLoading={updateMutation.isPending}
-                        disabled={!formData.name}
+                        disabled={isYarn ? !formData.name : !formData.size}
                         className="w-full flex items-center justify-center gap-2"
                     >
                         <Save size={20} />

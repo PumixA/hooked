@@ -1,4 +1,4 @@
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Settings, Plus, Loader2, Clock, Package, Trash2, Edit2, CheckCircle } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Navbar from '../components/BottomNavBar';
@@ -19,6 +19,7 @@ interface Project {
 
 export default function Dashboard() {
     const navigate = useNavigate();
+    const location = useLocation();
     const [isRefreshing, setIsRefreshing] = useState(false);
 
     // --- ETATS POUR LE MENU CONTEXTUEL ---
@@ -30,7 +31,6 @@ export default function Dashboard() {
     const [longPressTriggered, setLongPressTriggered] = useState(false);
 
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const pressStartTime = useRef<number>(0);
 
     // Hooks de donnees locales
     const { data: projects = [], isLoading: isProjectsLoading, isError, refetch } = useProjects();
@@ -38,6 +38,12 @@ export default function Dashboard() {
     const updateProjectMutation = useUpdateProject();
     const deleteProjectMutation = useDeleteProject();
     const syncMutation = useSync();
+
+    // Recharger les projets à chaque arrivée sur le dashboard
+    useEffect(() => {
+        refetch();
+        refetchWeekly();
+    }, [location.pathname]);
 
     useEffect(() => {
         const onFocus = () => { refetchWeekly(); refetch(); };
@@ -151,16 +157,15 @@ export default function Dashboard() {
 
     const handleCardClick = (projectId: string, e: React.MouseEvent) => {
         e.stopPropagation();
-        const timeSincePress = Date.now() - pressStartTime.current;
 
-        if (!longPressTriggered && timeSincePress > 200) {
-            navigate(`/projects/${projectId}`);
+        // Si le long press a été déclenché, ne pas naviguer
+        if (longPressTriggered) {
+            setLongPressTriggered(false);
+            return;
         }
 
-        setTimeout(() => {
-            setLongPressTriggered(false);
-            pressStartTime.current = 0;
-        }, 100);
+        // Navigation immédiate
+        navigate(`/projects/${projectId}`);
     };
 
     // --- TRI DES PROJETS ---

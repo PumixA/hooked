@@ -1,19 +1,42 @@
-import { useState } from 'react';
-import { ArrowLeft, Cloud, CloudOff, User, LogOut, RefreshCw, Smartphone, ChevronRight } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { ArrowLeft, Cloud, CloudOff, User, LogOut, RefreshCw, Smartphone, ChevronRight, Sun, Moon, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useApp, useSyncStatus } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import { useSync } from '../hooks/useOfflineData';
 import { localDb } from '../services/localDb';
+import api from '../services/api';
+
+type ThemeMode = 'dark' | 'light' | 'warm';
 
 export default function Settings() {
     const navigate = useNavigate();
-    const { updateSettings } = useApp();
+    const { settings, updateSettings } = useApp();
     const { hasAccount, syncEnabled, isSyncActive, accountEmail } = useSyncStatus();
     const { logout } = useAuth();
     const syncMutation = useSync();
 
     const [showClearConfirm, setShowClearConfirm] = useState(false);
+    const [currentTheme, setCurrentTheme] = useState<ThemeMode>((settings?.theme as ThemeMode) || 'dark');
+
+    // Appliquer le thème au document
+    useEffect(() => {
+        document.documentElement.setAttribute('data-theme', currentTheme);
+    }, [currentTheme]);
+
+    const handleThemeChange = async (theme: ThemeMode) => {
+        setCurrentTheme(theme);
+        updateSettings({ theme });
+
+        // Sauvegarder en BDD si connecté et sync activée
+        if (hasAccount && syncEnabled) {
+            try {
+                await api.patch('/users/me', { theme_pref: theme });
+            } catch (e) {
+                console.warn('Erreur sauvegarde theme:', e);
+            }
+        }
+    };
 
     const handleToggleSync = () => {
         if (!hasAccount) {
@@ -74,6 +97,52 @@ export default function Settings() {
                                     : 'Donnees stockees sur cet appareil'}
                             </p>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Section: Apparence */}
+            <div className="space-y-3">
+                <h2 className="text-sm font-medium text-gray-400 uppercase tracking-wider">
+                    Apparence
+                </h2>
+
+                <div className="bg-zinc-800 rounded-xl border border-zinc-700 p-4">
+                    <p className="text-white font-medium mb-3">Theme</p>
+                    <div className="grid grid-cols-3 gap-2">
+                        <button
+                            onClick={() => handleThemeChange('dark')}
+                            className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all ${
+                                currentTheme === 'dark'
+                                    ? 'bg-violet-500/20 border-violet-500 text-violet-400'
+                                    : 'bg-zinc-700/50 border-zinc-600 text-zinc-400 hover:border-zinc-500'
+                            }`}
+                        >
+                            <Moon size={20} />
+                            <span className="text-xs font-medium">Sombre</span>
+                        </button>
+                        <button
+                            onClick={() => handleThemeChange('light')}
+                            className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all ${
+                                currentTheme === 'light'
+                                    ? 'bg-violet-500/20 border-violet-500 text-violet-400'
+                                    : 'bg-zinc-700/50 border-zinc-600 text-zinc-400 hover:border-zinc-500'
+                            }`}
+                        >
+                            <Sun size={20} />
+                            <span className="text-xs font-medium">Clair</span>
+                        </button>
+                        <button
+                            onClick={() => handleThemeChange('warm')}
+                            className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all ${
+                                currentTheme === 'warm'
+                                    ? 'bg-amber-500/20 border-amber-500 text-amber-400'
+                                    : 'bg-zinc-700/50 border-zinc-600 text-zinc-400 hover:border-zinc-500'
+                            }`}
+                        >
+                            <Sparkles size={20} />
+                            <span className="text-xs font-medium">Chaud</span>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -227,10 +296,7 @@ export default function Settings() {
             {/* Info version */}
             <div className="text-center pt-4">
                 <p className="text-gray-500 text-xs">
-                    Hooked v2.0.0 - Offline First
-                </p>
-                <p className="text-gray-600 text-xs mt-1">
-                    Instance auto-hebergee
+                    Hooked v1.0.0
                 </p>
             </div>
         </div>
