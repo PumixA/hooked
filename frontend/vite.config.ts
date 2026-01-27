@@ -12,6 +12,7 @@ export default defineConfig({
       },
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'logo-mini.svg'],
       manifest: {
+        id: '/hooked-pwa/',
         name: 'Hooked',
         short_name: 'Hooked',
         description: 'Suivi de projets tricot et crochet',
@@ -19,10 +20,11 @@ export default defineConfig({
         theme_color: '#C4B5FD',
         background_color: '#1E1E1E',
         display: 'standalone',
-        display_override: ['standalone', 'window-controls-overlay'],
-        start_url: '/',
-        scope: '/',
+        display_override: ['standalone'],
+        start_url: '.',
+        scope: '.',
         orientation: 'portrait',
+        prefer_related_applications: false,
         icons: [
           {
             src: '/pwa-192x192.png',

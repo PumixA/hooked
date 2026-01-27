@@ -85,6 +85,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
     }, [settings]);
 
+    // Appliquer le thème au DOM à chaque changement
+    useEffect(() => {
+        document.documentElement.setAttribute('data-theme', settings.theme);
+    }, [settings.theme]);
+
     // Persister le compte dans localStorage
     useEffect(() => {
         if (account) {
