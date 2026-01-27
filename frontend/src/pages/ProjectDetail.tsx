@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings, TrendingUp, ImagePlus, Trash2, CheckCircle, Flag, X, ChevronLeft, ChevronRight, Check, Package, RotateCcw } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import Timer from '../components/features/Timer';
+import { localDb } from '../services/localDb';
 import Modal from '../components/ui/Modal';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
@@ -74,6 +75,55 @@ export default function ProjectDetail() {
             savedTimeRef.current = project.total_duration;
         }
     }, [project?.total_duration]);
+
+    // Sauvegarde automatique du timer toutes les 30 secondes quand actif
+    useEffect(() => {
+        if (!isActive || !project || !id) return;
+
+        const autoSaveInterval = setInterval(() => {
+            const currentElapsed = savedTimeRef.current + Math.floor((Date.now() - (startTimeRef.current || Date.now())) / 1000);
+            updateProjectMutation.mutate({ id, total_duration: currentElapsed });
+            console.log(`[Timer] Auto-save: ${currentElapsed}s`);
+        }, 30000); // Toutes les 30 secondes
+
+        return () => clearInterval(autoSaveInterval);
+    }, [isActive, project, id]);
+
+    // Sauvegarde quand la page perd le focus ou l'app est fermée
+    useEffect(() => {
+        if (!project || !id) return;
+
+        const saveOnHide = () => {
+            if (isActive && startTimeRef.current) {
+                const currentElapsed = savedTimeRef.current + Math.floor((Date.now() - startTimeRef.current) / 1000);
+                // Utiliser sendBeacon pour une sauvegarde fiable même si la page se ferme
+                localDb.saveProject({ id, total_duration: currentElapsed });
+                console.log(`[Timer] Save on visibility change: ${currentElapsed}s`);
+            }
+        };
+
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'hidden') {
+                saveOnHide();
+            }
+        };
+
+        const handleBeforeUnload = () => {
+            saveOnHide();
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        window.addEventListener('pagehide', handleBeforeUnload);
+
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            window.removeEventListener('beforeunload', handleBeforeUnload);
+            window.removeEventListener('pagehide', handleBeforeUnload);
+            // Sauvegarder aussi au démontage du composant
+            saveOnHide();
+        };
+    }, [isActive, project, id]);
 
     const [step, setStep] = useState(1);
     const [showNotes, setShowNotes] = useState(false);
@@ -214,6 +264,8 @@ export default function ProjectDetail() {
             const now = Date.now();
             const start = startTimeRef.current || now;
             const duration = Math.floor((now - start) / 1000);
+            // Calculer le temps exact au moment de l'arrêt
+            const exactElapsed = savedTimeRef.current + duration;
 
             if (duration > 2 && project && id) {
                 saveSessionMutation.mutate({
@@ -223,12 +275,15 @@ export default function ProjectDetail() {
                     duration_seconds: duration
                 });
             }
-            savedTimeRef.current = elapsed;
+
+            // Mettre à jour avec le temps exact
+            setElapsed(exactElapsed);
+            savedTimeRef.current = exactElapsed;
 
             if (project && id) {
                 updateProjectMutation.mutate({
                     id,
-                    total_duration: elapsed
+                    total_duration: exactElapsed
                 });
             }
 

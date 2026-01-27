@@ -7,7 +7,8 @@
  * - L'utilisateur peut connecter un compte pour activer la sync
  */
 
-import { createContext, useState, useEffect, useContext, type ReactNode } from 'react';
+import { createContext, useState, useEffect, useContext, useCallback, type ReactNode } from 'react';
+import api from '../services/api';
 
 // Types
 export interface AppSettings {
@@ -43,6 +44,7 @@ const defaultSettings: AppSettings = {
 
 const STORAGE_KEY = 'hooked_app_settings';
 const ACCOUNT_KEY = 'hooked_connected_account';
+const SETTINGS_UPDATED_KEY = 'hooked_settings_updated_at';
 
 const AppContext = createContext<AppContextType | null>(null);
 
@@ -51,7 +53,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         const stored = localStorage.getItem(STORAGE_KEY);
         if (stored) {
             try {
-                return { ...defaultSettings, ...JSON.parse(stored) };
+                const parsed = { ...defaultSettings, ...JSON.parse(stored) };
+                // S'assurer qu'un timestamp existe pour éviter l'écrasement par le serveur
+                if (!localStorage.getItem(SETTINGS_UPDATED_KEY)) {
+                    localStorage.setItem(SETTINGS_UPDATED_KEY, Date.now().toString());
+                }
+                return parsed;
             } catch {
                 return defaultSettings;
             }
@@ -87,9 +94,19 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         }
     }, [account]);
 
-    const updateSettings = (updates: Partial<AppSettings>) => {
+    const updateSettings = useCallback((updates: Partial<AppSettings>) => {
         setSettings(prev => ({ ...prev, ...updates }));
-    };
+        // Sauvegarder le timestamp de mise à jour
+        localStorage.setItem(SETTINGS_UPDATED_KEY, Date.now().toString());
+
+        // Sync le thème vers le serveur si connecté et sync activée
+        const token = localStorage.getItem('token');
+        if (token && updates.theme) {
+            api.patch('/users/me', { theme_pref: updates.theme }).catch(err => {
+                console.warn('[AppContext] Failed to sync theme:', err);
+            });
+        }
+    }, []);
 
     const setAccount = (newAccount: ConnectedAccount | null) => {
         setAccountState(newAccount);
@@ -98,6 +115,41 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
             updateSettings({ syncEnabled: false });
         }
     };
+
+    // Synchroniser le thème avec le serveur lors de la connexion
+    useEffect(() => {
+        const syncThemeWithServer = async () => {
+            const token = localStorage.getItem('token');
+            if (!token || !account) return;
+
+            try {
+                const response = await api.get('/users/me');
+                const serverTheme = response.data.theme_pref as AppSettings['theme'] | null;
+                const serverUpdatedAt = new Date(response.data.updated_at).getTime();
+                const localUpdatedAt = parseInt(localStorage.getItem(SETTINGS_UPDATED_KEY) || '0');
+
+                if (serverTheme) {
+                    // Si le serveur a un thème et qu'il est plus récent, l'utiliser
+                    if (serverUpdatedAt > localUpdatedAt) {
+                        console.log(`[AppContext] Using server theme: ${serverTheme}`);
+                        setSettings(prev => ({ ...prev, theme: serverTheme }));
+                    } else if (settings.theme !== serverTheme) {
+                        // Si le local est plus récent, envoyer au serveur
+                        console.log(`[AppContext] Pushing local theme to server: ${settings.theme}`);
+                        api.patch('/users/me', { theme_pref: settings.theme }).catch(console.warn);
+                    }
+                } else if (settings.theme !== 'dark') {
+                    // Pas de thème serveur, envoyer le local
+                    console.log(`[AppContext] No server theme, pushing local: ${settings.theme}`);
+                    api.patch('/users/me', { theme_pref: settings.theme }).catch(console.warn);
+                }
+            } catch (err) {
+                console.warn('[AppContext] Failed to sync theme with server:', err);
+            }
+        };
+
+        syncThemeWithServer();
+    }, [account]);
 
     // La sync est active seulement si un compte est connecté ET la sync est activée
     const isSyncActive = !!(account && settings.syncEnabled);
