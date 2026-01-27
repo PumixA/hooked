@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertCircle, ArrowLeft, Cloud } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -22,9 +22,15 @@ export default function Login() {
     const [password, setPassword] = useState('');
     const [error, setError] = useState<string | null>(null);
 
-    // Si deja connecte, rediriger vers settings
+    // Si deja connecte, rediriger vers settings (dans useEffect pour eviter l'erreur React)
+    useEffect(() => {
+        if (hasAccount) {
+            navigate('/settings', { replace: true });
+        }
+    }, [hasAccount, navigate]);
+
+    // Ne pas afficher le formulaire si deja connecte
     if (hasAccount) {
-        navigate('/settings', { replace: true });
         return null;
     }
 

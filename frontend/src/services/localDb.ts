@@ -67,6 +67,9 @@ export interface LocalPhoto {
     file_path?: string;
     base64?: string;
     file?: File | Blob;
+    fileBuffer?: ArrayBuffer; // Stockage plus fiable que File pour IndexedDB
+    fileType?: string; // MIME type du fichier
+    fileName?: string; // Nom du fichier original
     created_at: string;
     _syncStatus: 'synced' | 'pending';
     _isLocal: boolean;
@@ -191,6 +194,20 @@ export const localDb = {
         const existing = await db.get('projects', project.id);
 
         const now = Date.now();
+
+        // Déterminer le _syncStatus:
+        // - Si explicitement fourni, utiliser la valeur fournie
+        // - Si c'est une mise à jour (existing existe) et qu'on modifie des données, marquer comme 'pending'
+        // - Sinon, garder la valeur existante ou 'pending' par défaut
+        let syncStatus: 'synced' | 'pending' | 'conflict' = 'pending';
+        if (project._syncStatus !== undefined) {
+            // Valeur explicite fournie (ex: lors de l'import depuis API)
+            syncStatus = project._syncStatus;
+        } else if (existing) {
+            // C'est une mise à jour -> toujours marquer comme 'pending' pour re-sync
+            syncStatus = 'pending';
+        }
+
         const fullProject: LocalProject = {
             id: project.id,
             title: project.title || existing?.title || 'Sans titre',
@@ -202,9 +219,9 @@ export const localDb = {
             created_at: existing?.created_at || project.created_at || new Date().toISOString(),
             updated_at: new Date().toISOString(),
             end_date: project.end_date ?? existing?.end_date,
-            _syncStatus: 'pending',
+            _syncStatus: syncStatus,
             _localUpdatedAt: now,
-            _isLocal: existing?._isLocal ?? true,
+            _isLocal: project._isLocal ?? existing?._isLocal ?? true,
         };
 
         await db.put('projects', fullProject);
@@ -271,9 +288,9 @@ export const localDb = {
             material_composition: material.material_composition ?? existing?.material_composition,
             created_at: existing?.created_at || material.created_at || new Date().toISOString(),
             updated_at: new Date().toISOString(),
-            _syncStatus: 'pending',
+            _syncStatus: material._syncStatus ?? existing?._syncStatus ?? 'pending',
             _localUpdatedAt: now,
-            _isLocal: existing?._isLocal ?? true,
+            _isLocal: material._isLocal ?? existing?._isLocal ?? true,
         };
 
         await db.put('materials', fullMaterial);
@@ -322,9 +339,9 @@ export const localDb = {
             start_time: session.start_time || existing?.start_time || new Date().toISOString(),
             end_time: session.end_time || existing?.end_time || new Date().toISOString(),
             duration_seconds: session.duration_seconds ?? existing?.duration_seconds ?? 0,
-            _syncStatus: 'pending',
+            _syncStatus: session._syncStatus ?? existing?._syncStatus ?? 'pending',
             _localUpdatedAt: Date.now(),
-            _isLocal: existing?._isLocal ?? true,
+            _isLocal: session._isLocal ?? existing?._isLocal ?? true,
         };
 
         await db.put('sessions', fullSession);
@@ -366,9 +383,9 @@ export const localDb = {
             content: note.content ?? existing?.content ?? '',
             created_at: existing?.created_at || new Date().toISOString(),
             updated_at: new Date().toISOString(),
-            _syncStatus: 'pending',
+            _syncStatus: note._syncStatus ?? existing?._syncStatus ?? 'pending',
             _localUpdatedAt: Date.now(),
-            _isLocal: existing?._isLocal ?? true,
+            _isLocal: note._isLocal ?? existing?._isLocal ?? true,
         };
 
         await db.put('notes', fullNote);
@@ -392,19 +409,37 @@ export const localDb = {
         const db = await getDb();
         const existing = await db.get('photos', photo.id);
 
+        // Convertir File/Blob en ArrayBuffer si fourni
+        let fileBuffer = photo.fileBuffer ?? existing?.fileBuffer;
+        let fileType = photo.fileType ?? existing?.fileType;
+        let fileName = photo.fileName ?? existing?.fileName;
+
+        if (photo.file && !fileBuffer) {
+            try {
+                fileBuffer = await photo.file.arrayBuffer();
+                fileType = photo.file.type;
+                fileName = (photo.file as File).name || 'photo.jpg';
+            } catch (e) {
+                console.warn('[LocalDB] Could not convert file to ArrayBuffer:', e);
+            }
+        }
+
         const fullPhoto: LocalPhoto = {
             id: photo.id,
             project_id: photo.project_id,
             file_path: photo.file_path ?? existing?.file_path,
             base64: photo.base64 ?? existing?.base64,
             file: photo.file ?? existing?.file,
+            fileBuffer,
+            fileType,
+            fileName,
             created_at: existing?.created_at || photo.created_at || new Date().toISOString(),
-            _syncStatus: photo._syncStatus || 'pending',
-            _isLocal: existing?._isLocal ?? true,
+            _syncStatus: photo._syncStatus ?? existing?._syncStatus ?? 'pending',
+            _isLocal: photo._isLocal ?? existing?._isLocal ?? true,
         };
 
         await db.put('photos', fullPhoto);
-        console.log(`💾 [LocalDB] Photo saved: ${photo.id}`);
+        console.log(`💾 [LocalDB] Photo saved: ${photo.id} (buffer: ${fileBuffer ? 'yes' : 'no'})`);
         return fullPhoto;
     },
 
@@ -462,12 +497,17 @@ export const localDb = {
                 const existing = await tx.store.get(p.id);
                 // Ne pas écraser si on a des changements locaux non synchronisés
                 if (!existing || existing._syncStatus === 'synced') {
-                    await tx.store.put({
+                    // Préserver les valeurs locales si elles sont plus récentes/différentes
+                    const mergedProject = {
                         ...p,
-                        _syncStatus: 'synced',
+                        // Garder les valeurs locales si elles sont supérieures (évite de perdre le travail)
+                        current_row: existing ? Math.max(existing.current_row || 0, p.current_row || 0) : (p.current_row || 0),
+                        total_duration: existing ? Math.max(existing.total_duration || 0, p.total_duration || 0) : (p.total_duration || 0),
+                        _syncStatus: 'synced' as const,
                         _localUpdatedAt: Date.now(),
                         _isLocal: false,
-                    });
+                    };
+                    await tx.store.put(mergedProject);
                 }
             }
             await tx.done;

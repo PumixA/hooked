@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { Settings, Plus, Loader2, Clock, WifiOff, Package, Trash2, Edit2, CheckCircle } from 'lucide-react';
+import { Settings, Plus, Loader2, Clock, Package, Trash2, Edit2, CheckCircle } from 'lucide-react';
 import Card from '../components/ui/Card';
 import Navbar from '../components/BottomNavBar';
 import { useState, useRef, useEffect } from 'react';
@@ -15,15 +15,13 @@ interface Project {
     goal_rows?: number;
     updated_at: string;
     status: string;
-    _syncStatus?: string;
-    _isLocal?: boolean;
 }
 
 export default function Dashboard() {
     const navigate = useNavigate();
     const [isRefreshing, setIsRefreshing] = useState(false);
 
-    // --- ÉTATS POUR LE MENU CONTEXTUEL ---
+    // --- ETATS POUR LE MENU CONTEXTUEL ---
     const [selectedProject, setSelectedProject] = useState<Project | null>(null);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
@@ -34,26 +32,12 @@ export default function Dashboard() {
     const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const pressStartTime = useRef<number>(0);
 
-    // 🔥 OFFLINE-FIRST: Utilisation des hooks locaux
+    // Hooks de donnees locales
     const { data: projects = [], isLoading: isProjectsLoading, isError, refetch } = useProjects();
     const { data: weeklyTimeData, isLoading: isWeeklyLoading, refetch: refetchWeekly } = useWeeklyTime();
     const updateProjectMutation = useUpdateProject();
     const deleteProjectMutation = useDeleteProject();
     const syncMutation = useSync();
-
-    // État de connexion
-    const [isOnline, setIsOnline] = useState(navigator.onLine);
-
-    useEffect(() => {
-        const handleOnline = () => setIsOnline(true);
-        const handleOffline = () => setIsOnline(false);
-        window.addEventListener('online', handleOnline);
-        window.addEventListener('offline', handleOffline);
-        return () => {
-            window.removeEventListener('online', handleOnline);
-            window.removeEventListener('offline', handleOffline);
-        };
-    }, []);
 
     useEffect(() => {
         const onFocus = () => { refetchWeekly(); refetch(); };
@@ -187,22 +171,19 @@ export default function Dashboard() {
     const lastProject = sortedProjects[0];
     const otherProjects = sortedProjects.slice(1);
 
-    // Compter les projets en attente de sync
-    const pendingCount = projectList.filter(p => p._syncStatus === 'pending').length;
-
     // --- RENDU ---
 
     if (isError && projectList.length === 0) {
         return (
             <div className="h-screen flex flex-col items-center justify-center text-zinc-500 bg-background gap-4 p-4 text-center">
-                <WifiOff size={48} />
-                <p className="text-lg font-medium text-white">Oups, connexion perdue</p>
+                <Package size={48} />
+                <p className="text-lg font-medium text-white">Erreur de chargement</p>
                 <p className="text-sm">Impossible de charger vos projets.</p>
                 <button
                     onClick={() => window.location.reload()}
                     className="mt-4 px-6 py-2 bg-zinc-800 rounded-full text-white hover:bg-zinc-700 transition"
                 >
-                    Réessayer
+                    Reessayer
                 </button>
             </div>
         );
@@ -219,21 +200,9 @@ export default function Dashboard() {
                         <img src="/logo-mini.svg" className="w-8 h-8" alt="Logo" />
                         <h1 className="text-2xl font-bold">Bonjour !</h1>
                     </div>
-                    <div className="flex items-center gap-3">
-                        {!isOnline && (
-                            <span className="text-[10px] bg-orange-500/20 text-orange-400 px-2 py-1 rounded-full border border-orange-500/50 flex items-center gap-1">
-                                <WifiOff size={12} /> Hors ligne
-                            </span>
-                        )}
-                        {pendingCount > 0 && (
-                            <span className="text-[10px] bg-yellow-500/20 text-yellow-400 px-2 py-1 rounded-full">
-                                {pendingCount} en attente
-                            </span>
-                        )}
-                        <button onClick={() => navigate('/settings')} className="p-2 rounded-full bg-secondary text-gray-400 hover:text-white transition">
-                            <Settings size={20} />
-                        </button>
-                    </div>
+                    <button onClick={() => navigate('/settings')} className="p-2 rounded-full bg-secondary text-gray-400 hover:text-white transition">
+                        <Settings size={20} />
+                    </button>
                 </div>
 
                 {/* STATS */}
@@ -301,13 +270,6 @@ export default function Dashboard() {
                             >
                                 <img src="/logo.svg" alt="" className="absolute top-3 right-3 w-16 h-16 opacity-50 pointer-events-none" />
 
-                                {/* Indicateur de sync */}
-                                {lastProject._syncStatus === 'pending' && (
-                                    <div className="absolute top-3 left-3 bg-yellow-500/20 text-yellow-400 text-[10px] px-2 py-0.5 rounded-full">
-                                        Non synchronisé
-                                    </div>
-                                )}
-
                                 <div className="flex items-center gap-2 mb-3">
                                     <span className={`inline-block text-[10px] px-3 py-1 rounded-full font-bold uppercase tracking-wider ${lastProject.status === 'completed' ? 'bg-green-500/20 text-green-400' : 'bg-primary/20 text-primary'}`}>
                                         {lastProject.status === 'completed' ? 'Terminé' : 'Dernier projet'}
@@ -343,9 +305,6 @@ export default function Dashboard() {
                                         onClick={(e) => handleCardClick(proj.id, e)}
                                         className={`relative p-4 rounded-xl border active:scale-[0.96] transition-transform flex flex-col justify-between h-32 bg-secondary select-none cursor-pointer ${proj.status === 'completed' ? 'border-green-500/30 bg-green-500/5' : 'border-zinc-800'}`}
                                     >
-                                        {proj._syncStatus === 'pending' && (
-                                            <div className="absolute top-2 right-2 w-2 h-2 bg-yellow-400 rounded-full" title="Non synchronisé" />
-                                        )}
                                         <div className={`w-8 h-8 rounded-full flex items-center justify-center mb-2 font-bold text-xs ${proj.status === 'completed' ? 'bg-green-500/20 text-green-400' : 'bg-zinc-800 text-zinc-500'}`}>
                                             {proj.status === 'completed' ? <CheckCircle size={14} /> : '#'}
                                         </div>

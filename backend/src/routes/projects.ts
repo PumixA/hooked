@@ -7,7 +7,10 @@ import { prisma } from '../index';
 const createProjectSchema = z.object({
     title: z.string().min(1, "Le titre est requis"),
     category_id: z.string().uuid().optional(),
-    goal_rows: z.number().optional()
+    goal_rows: z.number().optional(),
+    current_row: z.number().optional(),
+    total_duration: z.number().optional(),
+    status: z.enum(['in_progress', 'completed', 'archived']).optional()
 });
 
 // Validation Zod pour la mise à jour (PATCH)
@@ -41,7 +44,7 @@ export async function projectsRoutes(server: FastifyInstance) {
         const result = createProjectSchema.safeParse(request.body);
         if (!result.success) return reply.code(400).send(result.error.issues);
 
-        const { title, category_id, goal_rows } = result.data;
+        const { title, category_id, goal_rows, current_row, total_duration, status } = result.data;
         const userId = request.user.id;
 
         try {
@@ -51,7 +54,9 @@ export async function projectsRoutes(server: FastifyInstance) {
                     title,
                     category_id,
                     goal_rows,
-                    status: 'in_progress'
+                    current_row: current_row || 0,
+                    total_duration: total_duration || 0,
+                    status: status || 'in_progress'
                 }
             });
             return reply.code(201).send(newProject);
