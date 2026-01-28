@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ArrowLeft, Cloud, CloudOff, User, LogOut, RefreshCw, Smartphone, ChevronRight, Sun, Moon, Sparkles } from 'lucide-react';
+import { ArrowLeft, Cloud, CloudOff, User, LogOut, RefreshCw, Smartphone, ChevronRight, Sun, Moon, Sparkles, Shield } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useApp, useSyncStatus } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
@@ -12,7 +12,7 @@ type ThemeMode = 'dark' | 'light' | 'warm';
 export default function Settings() {
     const navigate = useNavigate();
     const { settings, updateSettings } = useApp();
-    const { hasAccount, syncEnabled, isSyncActive, accountEmail } = useSyncStatus();
+    const { hasAccount, syncEnabled, isSyncActive, accountEmail, accountRole } = useSyncStatus();
     const { logout } = useAuth();
     const syncMutation = useSync();
 
@@ -166,6 +166,25 @@ export default function Settings() {
                                     <p className="text-gray-400 text-sm">{accountEmail}</p>
                                 </div>
                             </div>
+
+                            {/* Lien Admin - Visible uniquement pour les admins */}
+                            {accountRole === 'admin' && (
+                                <button
+                                    onClick={() => navigate('/admin/users')}
+                                    className="w-full p-4 flex items-center gap-3"
+                                >
+                                    <div className="p-2 rounded-lg bg-purple-500/20">
+                                        <Shield className="w-5 h-5 text-purple-400" />
+                                    </div>
+                                    <div className="flex-1 text-left">
+                                        <p className="text-white font-medium">Administration</p>
+                                        <p className="text-gray-400 text-sm">
+                                            Gérer les utilisateurs
+                                        </p>
+                                    </div>
+                                    <ChevronRight className="w-5 h-5 text-gray-400" />
+                                </button>
+                            )}
 
                             {/* Toggle sync */}
                             <button
