@@ -65,4 +65,34 @@ export async function notesRoutes(server: FastifyInstance) {
             return reply.code(201).send(created);
         }
     });
+
+    // DELETE /notes/:id -> Supprimer une note
+    server.delete('/:id', async (request, reply) => {
+        const { id } = request.params as { id: string };
+        const userId = request.user.id;
+
+        // 1. Récupérer la note pour vérifier les droits
+        const note = await prisma.notes.findUnique({
+            where: { id },
+            include: { projects: true }
+        });
+
+        if (!note) {
+            return reply.code(404).send({ error: "Note introuvable" });
+        }
+
+        // 2. Vérification des droits
+        if (note.projects?.user_id !== userId) {
+            return reply.code(403).send({ error: "Accès interdit" });
+        }
+
+        // 3. Suppression
+        try {
+            await prisma.notes.delete({ where: { id } });
+            return reply.code(204).send();
+        } catch (err) {
+            server.log.error(err);
+            return reply.code(500).send({ error: "Erreur lors de la suppression" });
+        }
+    });
 }

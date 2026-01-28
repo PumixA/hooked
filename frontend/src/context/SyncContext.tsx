@@ -1,15 +1,21 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import api from '../services/api';
+import { setOfflineMode } from '../services/api';
+import { syncService } from '../services/syncService';
 
 // --- TYPES ---
 export type SyncActionType =
     | 'CREATE_PROJECT'
     | 'UPDATE_PROJECT'
+    | 'DELETE_PROJECT'
     | 'CREATE_MATERIAL'
+    | 'UPDATE_MATERIAL'
     | 'DELETE_MATERIAL'
     | 'SAVE_SESSION'
-    | 'ADD_NOTE';
+    | 'ADD_NOTE'
+    | 'DELETE_NOTE'
+    | 'UPLOAD_PHOTO'
+    | 'DELETE_PHOTO';
 
 export interface SyncItem {
     id: string;
@@ -23,46 +29,60 @@ interface SyncContextType {
     queue: SyncItem[];
     addToQueue: (type: SyncActionType, payload: any) => void;
     syncNow: () => Promise<void>;
+    isSyncing: boolean;
+    logCache: () => void;
+    updateCacheOptimistically: <T>(queryKey: string[], updater: (old: T) => T) => void;
 }
 
 // --- CONTEXTE ---
 const SyncContext = createContext<SyncContextType | null>(null);
 
-// Générateur d'ID compatible mobile
+// Générateur d'ID
 const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
 
 // --- PROVIDER ---
 export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const queryClient = useQueryClient();
 
-    // 🔥 CORRECTION : On synchronise toujours avec navigator.onLine
+    // État de connexion
     const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
+    const [isSyncing, setIsSyncing] = useState(false);
 
-    // 1. Chargement initial sécurisé
+    // Queue legacy (pour compatibilité)
     const [queue, setQueue] = useState<SyncItem[]>(() => {
         try {
             const saved = localStorage.getItem('sync_queue');
             return saved ? JSON.parse(saved) : [];
-        } catch (e) {
+        } catch {
             return [];
         }
     });
 
-    // 2. Sauvegarde auto
+    // Sauvegarde auto de la queue
     useEffect(() => {
         localStorage.setItem('sync_queue', JSON.stringify(queue));
     }, [queue]);
 
-    // 3. Écouteurs Réseau
+    // Écouteurs Réseau (Online/Offline)
     useEffect(() => {
         const handleOnline = () => {
-            console.log("🟢 Événement : Connexion rétablie !");
+            console.log("🟢 Connexion rétablie");
             setIsOnline(true);
+            setOfflineMode(false);
+            // Sync automatique au retour online
+            syncService.syncAll().then(() => {
+                queryClient.invalidateQueries();
+            });
         };
+
         const handleOffline = () => {
-            console.log("🔴 Événement : Connexion perdue.");
+            console.log("🔴 Connexion perdue");
             setIsOnline(false);
+            setOfflineMode(true);
         };
+
+        // Synchroniser l'état initial
+        setOfflineMode(!navigator.onLine);
 
         window.addEventListener('online', handleOnline);
         window.addEventListener('offline', handleOffline);
@@ -71,36 +91,16 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
             window.removeEventListener('online', handleOnline);
             window.removeEventListener('offline', handleOffline);
         };
+    }, [queryClient]);
+
+    // Sync initiale au démarrage
+    useEffect(() => {
+        if (navigator.onLine) {
+            syncService.syncAll().catch(console.error);
+        }
     }, []);
 
-    // 4. Déclencheur changement d'état (Retour Online)
-    useEffect(() => {
-        if (isOnline && queue.length > 0) {
-            console.log("🔄 Connexion rétablie, lancement de la sync...");
-            processQueue();
-        }
-    }, [isOnline]);
-
-    // 5. HEARTBEAT (Le Check Régulier)
-    useEffect(() => {
-        const heartbeat = setInterval(() => {
-            // 🔥 CORRECTION : On resynchronise l'état avec navigator.onLine
-            const navigatorOnline = navigator.onLine;
-
-            if (navigatorOnline !== isOnline) {
-                console.log(`💓 Heartbeat : Correction de l'état (${isOnline} -> ${navigatorOnline})`);
-                setIsOnline(navigatorOnline);
-            }
-
-            if (queue.length > 0 && navigatorOnline) {
-                console.log("💓 Heartbeat : Relance file d'attente...");
-                processQueue();
-            }
-        }, 10000); // Toutes les 10 secondes
-
-        return () => clearInterval(heartbeat);
-    }, [queue, isOnline]);
-
+    // Legacy: addToQueue (pour composants non migrés)
     const addToQueue = useCallback((type: SyncActionType, payload: any) => {
         const newItem: SyncItem = {
             id: generateId(),
@@ -108,83 +108,68 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
             payload,
             timestamp: Date.now()
         };
-        console.log(`📥 Ajout à la queue : ${type}`, payload);
+        console.log(`📥 [Legacy Queue] ${type}`, payload);
         setQueue(prev => [...prev, newItem]);
     }, []);
 
-    const processQueue = useCallback(async () => {
-        if (queue.length === 0) return;
-
-        // 🔥 CORRECTION : On vérifie que navigator.onLine est vraiment true
-        if (!navigator.onLine) {
-            console.log("⚠️ Abandon de la sync : pas de connexion réseau");
-            return;
+    // Fonction pour logger l'état du cache
+    const logCache = useCallback(() => {
+        console.log('\n🔍 === DEBUG ===');
+        console.log('Online:', navigator.onLine);
+        console.log('Queue legacy:', queue.length);
+        console.log('React Query cache:', queryClient.getQueryCache().getAll().length, 'entries');
+        // Utiliser le debug de localDb
+        if ((window as any).__localDb) {
+            (window as any).__localDb.debugDump();
         }
+    }, [queryClient, queue]);
 
-        console.log(`🔄 Sync : Traitement de ${queue.length} actions...`);
-        const currentQueue = [...queue];
-        const failedItems: SyncItem[] = [];
-        let successCount = 0;
-
-        for (const item of currentQueue) {
-            try {
-                switch (item.type) {
-                    case 'CREATE_PROJECT':
-                        await api.post('/projects', item.payload);
-                        break;
-                    case 'UPDATE_PROJECT':
-                        const { id, ...data } = item.payload;
-                        // On évite d'envoyer des updates sur des IDs temporaires qui n'existent pas au back
-                        if (!String(id).startsWith('temp-')) {
-                            await api.patch(`/projects/${id}`, data);
-                        }
-                        break;
-                    case 'CREATE_MATERIAL':
-                        await api.post('/materials', item.payload);
-                        break;
-                    case 'DELETE_MATERIAL':
-                        await api.delete(`/materials/${item.payload.id}`);
-                        break;
-                    case 'SAVE_SESSION':
-                        await api.post('/sessions', item.payload);
-                        break;
-                    case 'ADD_NOTE':
-                        await api.post('/notes', item.payload);
-                        break;
-                }
-                console.log(`✅ ${item.type} OK`);
-                successCount++;
-            } catch (error: any) {
-                console.warn(`⏳ ${item.type} reporté`, error);
-                // 🔥 CORRECTION : On ne marque comme échec que si c'est une erreur réseau
-                if (!error.response || error.code === 'ECONNABORTED' || error.message === 'Network Error') {
-                    failedItems.push(item);
-                } else {
-                    // Si c'est une erreur métier (400, 404, etc.), on ne retente pas
-                    console.error(`❌ ${item.type} : erreur métier, abandon`, error);
-                }
-            }
+    // Mise à jour optimiste du cache
+    const updateCacheOptimistically = useCallback(<T,>(queryKey: string[], updater: (old: T) => T) => {
+        const oldData = queryClient.getQueryData<T>(queryKey);
+        if (oldData !== undefined) {
+            const newData = updater(oldData);
+            queryClient.setQueryData(queryKey, newData);
         }
+    }, [queryClient]);
 
-        setQueue(failedItems);
-
-        if (successCount > 0) {
-            console.log("✨ Synchro réussie !");
+    // Sync manuelle
+    const syncNow = useCallback(async () => {
+        if (isSyncing) return;
+        setIsSyncing(true);
+        try {
+            await syncService.syncAll();
             await queryClient.invalidateQueries();
+        } finally {
+            setIsSyncing(false);
         }
+    }, [isSyncing, queryClient]);
 
-        // 🔥 CORRECTION IMPORTANTE : On ne passe plus en offline ici
-        // On laisse navigator.onLine être la source de vérité
-    }, [queue, queryClient]);
+    // Exposer les fonctions de debug
+    useEffect(() => {
+        (window as any).__hooked = {
+            logCache,
+            syncNow,
+            isOnline,
+            queueLength: queue.length
+        };
+    }, [logCache, syncNow, queue, isOnline]);
 
     return (
-        <SyncContext.Provider value={{ isOnline, queue, addToQueue, syncNow: processQueue }}>
+        <SyncContext.Provider value={{
+            isOnline,
+            queue,
+            addToQueue,
+            syncNow,
+            isSyncing,
+            logCache,
+            updateCacheOptimistically
+        }}>
             {children}
         </SyncContext.Provider>
     );
 };
 
-// --- HOOK (DOIT ÊTRE EN DEHORS DU PROVIDER) ---
 export const useSync = () => {
     const context = useContext(SyncContext);
     if (!context) throw new Error("useSync doit être utilisé dans un SyncProvider");

@@ -1,34 +1,45 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Loader2, Save } from 'lucide-react';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
-import { useCreateMaterial } from '../hooks/useOfflineData';
+import { useMaterial, useUpdateMaterial } from '../hooks/useOfflineData';
 
-export default function MaterialCreate() {
+interface MaterialForm {
+    category_type: 'hook' | 'yarn' | 'needle';
+    name: string;
+    size?: string;
+    brand?: string;
+    material_composition?: string;
+}
+
+export default function MaterialEdit() {
+    const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
 
-    const types = [
-        { label: 'Crochets', value: 'hook' },
-        { label: 'Laine', value: 'yarn' },
-        { label: 'Aiguilles', value: 'needle' }
-    ];
+    const [formData, setFormData] = useState<MaterialForm | null>(null);
 
-    const [formData, setFormData] = useState({
-        category_type: 'hook',
-        name: '',
-        size: '',
-        brand: '',
-        material_composition: ''
-    });
+    // OFFLINE-FIRST: Utilisation des hooks locaux
+    const { data: material, isLoading: isLoadingMaterial, isError } = useMaterial(id);
+    const updateMutation = useUpdateMaterial();
 
-    // OFFLINE-FIRST: Utilisation du hook local
-    const createMaterialMutation = useCreateMaterial();
+    // Effet pour mettre à jour le formulaire quand les données arrivent
+    useEffect(() => {
+        if (material) {
+            setFormData({
+                category_type: material.category_type,
+                name: material.name,
+                size: material.size,
+                brand: material.brand,
+                material_composition: material.material_composition
+            });
+        }
+    }, [material]);
 
     // Validation taille: seulement des chiffres (max 1 chiffre apres la virgule)
     const handleSizeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (!formData) return;
         const value = e.target.value;
-        // Accepter: vide, chiffres, un point/virgule suivi d'un chiffre max
         if (value === '' || /^\d{1,2}([.,]\d?)?$/.test(value)) {
             setFormData({...formData, size: value.replace(',', '.')});
         }
@@ -36,31 +47,55 @@ export default function MaterialCreate() {
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!formData.name) return;
+        if (!formData || !id || !formData.name) return;
 
-        createMaterialMutation.mutate(formData, {
+        updateMutation.mutate({ id, ...formData }, {
             onSuccess: () => {
                 navigate('/inventory');
             }
         });
     };
 
+    const types: { label: string; value: 'hook' | 'yarn' | 'needle' }[] = [
+        { label: 'Crochets', value: 'hook' },
+        { label: 'Laine', value: 'yarn' },
+        { label: 'Aiguilles', value: 'needle' }
+    ];
+
+    if (isLoadingMaterial) {
+        return (
+            <div className="h-screen flex items-center justify-center text-primary bg-background">
+                <Loader2 className="animate-spin" size={40} />
+            </div>
+        );
+    }
+
+    if (isError || !formData) {
+        return (
+            <div className="h-screen flex flex-col items-center justify-center text-zinc-500 bg-background gap-4 p-4 text-center">
+                <p className="text-lg font-medium">Impossible de charger l'élément.</p>
+                <button
+                    onClick={() => navigate('/inventory')}
+                    className="mt-4 px-6 py-2 bg-zinc-800 rounded-full text-white hover:bg-zinc-700 transition"
+                >
+                    Retour à l'inventaire
+                </button>
+            </div>
+        );
+    }
+
     const isYarn = formData.category_type === 'yarn';
 
     return (
         <div className="min-h-screen bg-background p-4 text-white animate-fade-in pb-20">
-
-            {/* Header */}
             <div className="flex items-center gap-4 mb-6">
                 <button onClick={() => navigate(-1)} className="text-zinc-400 hover:text-white transition p-2">
                     <ArrowLeft size={24} />
                 </button>
-                <h1 className="text-xl font-bold">Nouveau matériel</h1>
+                <h1 className="text-xl font-bold">Modifier le matériel</h1>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-6 max-w-md mx-auto">
-
-                {/* 1. Type */}
                 <div className="space-y-2">
                     <label className="text-xs text-zinc-400 ml-1">Type</label>
                     <div className="flex flex-wrap gap-2">
@@ -81,16 +116,13 @@ export default function MaterialCreate() {
                     </div>
                 </div>
 
-                {/* 2. Nom (obligatoire) */}
                 <Input
                     label="Nom *"
-                    placeholder={isYarn ? "Ex: Merino Rouge" : "Ex: Mon crochet préféré"}
                     value={formData.name}
                     onChange={(e) => setFormData({...formData, name: e.target.value})}
                     required
                 />
 
-                {/* 3. Taille (optionnel, surtout pour crochets/aiguilles) */}
                 {!isYarn && (
                     <div className="space-y-2">
                         <label className="text-xs text-zinc-400 ml-1">Taille (mm)</label>
@@ -99,7 +131,7 @@ export default function MaterialCreate() {
                                 type="text"
                                 inputMode="decimal"
                                 placeholder="Ex: 4"
-                                value={formData.size}
+                                value={formData.size || ''}
                                 onChange={handleSizeChange}
                                 className="w-full p-4 pr-12 rounded-xl bg-secondary border border-zinc-800 text-white placeholder-zinc-500 focus:outline-none focus:border-primary transition-colors"
                             />
@@ -110,31 +142,27 @@ export default function MaterialCreate() {
 
                 <Input
                     label="Marque"
-                    placeholder="ex: Clover, Drops..."
-                    value={formData.brand}
+                    value={formData.brand || ''}
                     onChange={(e) => setFormData({...formData, brand: e.target.value})}
                 />
 
                 <Input
                     label="Matière"
-                    placeholder="ex: Aluminium, Merino, Bambou..."
-                    value={formData.material_composition}
+                    value={formData.material_composition || ''}
                     onChange={(e) => setFormData({...formData, material_composition: e.target.value})}
                 />
 
-                {/* Bouton Action */}
                 <div className="pt-4">
                     <Button
                         type="submit"
-                        isLoading={createMaterialMutation.isPending}
+                        isLoading={updateMutation.isPending}
                         disabled={!formData.name}
                         className="w-full flex items-center justify-center gap-2"
                     >
-                        {createMaterialMutation.isPending ? <Loader2 className="animate-spin" /> : <Save size={20} />}
-                        <span>Ajouter au stock</span>
+                        <Save size={20} />
+                        <span>Enregistrer les modifications</span>
                     </Button>
                 </div>
-
             </form>
         </div>
     );

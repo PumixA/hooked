@@ -14,7 +14,7 @@ import { projectsRoutes } from './routes/projects';
 import { materialsRoutes } from './routes/materials';
 import { sessionsRoutes } from './routes/sessions';
 import { photosRoutes } from './routes/photos';
-import { notesRoutes } from './routes/notes'; // <--- AJOUT IMPORT (HOOK-55)
+import { notesRoutes } from './routes/notes';
 
 dotenv.config();
 
@@ -24,8 +24,13 @@ const server = fastify({ logger: true });
 
 const start = async () => {
   try {
-    // 1. Plugins Globaux
-    await server.register(cors, { origin: '*' });
+    // 1. Plugins Globaux - CORS doit être configuré pour autoriser les méthodes PUT et DELETE
+    await server.register(cors, {
+      origin: true, // ✅ MODIFICATION : Autorise l'origine de la requête (nécessaire pour credentials)
+      credentials: true, // ✅ MODIFICATION : Autorise les credentials (cookies, headers auth)
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'], // <--- AJOUT EXPLICITE DES MÉTHODES
+      allowedHeaders: ['Content-Type', 'Authorization'] // <--- AJOUT EXPLICITE DES HEADERS
+    });
 
     // 2. Configuration JWT
     await server.register(jwt, {
@@ -65,8 +70,6 @@ const start = async () => {
     await server.register(materialsRoutes, { prefix: '/materials' });
     await server.register(sessionsRoutes, { prefix: '/sessions' });
     await server.register(photosRoutes, { prefix: '/photos' });
-
-    // NOUVELLE ROUTE NOTES (HOOK-55)
     await server.register(notesRoutes, { prefix: '/notes' });
 
     // 5. Routes Publiques

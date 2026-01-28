@@ -6,12 +6,13 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate', // Met à jour dès qu'il peut
+      registerType: 'autoUpdate',
       devOptions: {
-        enabled: true // Active le SW même en dev (npm run dev)
+        enabled: true
       },
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'logo-mini.svg'],
       manifest: {
+        id: '/',
         name: 'Hooked',
         short_name: 'Hooked',
         description: 'Suivi de projets tricot et crochet',
@@ -41,37 +42,20 @@ export default defineConfig({
           }
         ]
       },
-      // --- CONFIGURATION WORKBOX (Le Cœur du Cache) ---
       workbox: {
-        // 1. Force le SW à s'activer immédiatement
         skipWaiting: true,
         clientsClaim: true,
-
-        // 2. Cache tous les fichiers statiques (App Shell)
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
-
-        // 3. Cache l'API
-        runtimeCaching: [
-          {
-            // Cache tout ce qui va vers le backend (Port 3000)
-            urlPattern: ({ url }) => url.host.includes(':3000'),
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-cache',
-              expiration: {
-                maxEntries: 100,
-                maxAgeSeconds: 60 * 60 * 24
-              },
-              cacheableResponse: {
-                statuses: [0, 200]
-              }
-            }
-          }
-        ]
+        cleanupOutdatedCaches: true,
+        // 🔥 OFFLINE-FIRST via IndexedDB: Pas de cache SW pour l'API
+        // Les données sont gérées par localDb.ts et syncService.ts
+        runtimeCaching: [],
+        navigateFallback: null
       }
     })
   ],
   server: {
     host: '0.0.0.0',
+    allowedHosts: true,
   }
 });

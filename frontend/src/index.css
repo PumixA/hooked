@@ -2,7 +2,71 @@
 @tailwind components;
 @tailwind utilities;
 
-/* On peut ajouter des styles globaux ici si besoin */
+/* Theme sombre (par defaut) */
+:root,
+[data-theme="dark"] {
+  --color-background: #1E1E1E;
+  --color-primary: #C4B5FD;
+  --color-secondary: #2A2A2A;
+  --color-text: #ffffff;
+  --color-text-muted: #a1a1aa;
+}
+
+/* Theme clair */
+[data-theme="light"] {
+  --color-background: #F5F5F5;
+  --color-primary: #7C3AED;
+  --color-secondary: #FFFFFF;
+  --color-text: #1E1E1E;
+  --color-text-muted: #52525b;
+}
+
+/* Theme chaud/jaune */
+[data-theme="warm"] {
+  --color-background: #1A1814;
+  --color-primary: #F59E0B;
+  --color-secondary: #292524;
+  --color-text: #FEF3C7;
+  --color-text-muted: #D4A574;
+}
+
 body {
-  @apply bg-background text-white;
+  background-color: var(--color-background);
+  color: var(--color-text);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Ajustements pour le theme clair */
+[data-theme="light"] .text-white {
+  color: var(--color-text);
+}
+
+[data-theme="light"] .text-zinc-400,
+[data-theme="light"] .text-zinc-500,
+[data-theme="light"] .text-gray-400,
+[data-theme="light"] .text-gray-500 {
+  color: var(--color-text-muted);
+}
+
+[data-theme="light"] .bg-zinc-800,
+[data-theme="light"] .bg-secondary {
+  background-color: var(--color-secondary);
+  border-color: #e4e4e7;
+}
+
+[data-theme="light"] .border-zinc-700,
+[data-theme="light"] .border-zinc-800 {
+  border-color: #e4e4e7;
+}
+
+/* Ajustements pour le theme chaud */
+[data-theme="warm"] .text-white {
+  color: var(--color-text);
+}
+
+[data-theme="warm"] .text-zinc-400,
+[data-theme="warm"] .text-zinc-500,
+[data-theme="warm"] .text-gray-400,
+[data-theme="warm"] .text-gray-500 {
+  color: var(--color-text-muted);
 }

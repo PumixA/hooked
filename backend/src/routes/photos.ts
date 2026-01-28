@@ -80,4 +80,46 @@ export async function photosRoutes(server: FastifyInstance) {
 
         return photos;
     });
+
+    // DELETE /photos/:id -> Supprimer une photo
+    server.delete('/:id', async (request, reply) => {
+        const { id } = request.params as { id: string };
+        const userId = request.user.id;
+
+        // 1. Récupérer la photo pour vérifier les droits et avoir le chemin du fichier
+        const photo = await prisma.photos.findUnique({
+            where: { id },
+            include: { projects: true } // Pour vérifier le user_id du projet
+        });
+
+        if (!photo) {
+            return reply.code(404).send({ error: "Photo introuvable" });
+        }
+
+        // 2. Vérification des droits
+        if (photo.projects?.user_id !== userId) {
+            return reply.code(403).send({ error: "Accès interdit" });
+        }
+
+        // 3. Suppression du fichier physique
+        const filePath = path.join(__dirname, '../../', photo.file_path);
+        if (fs.existsSync(filePath)) {
+            try {
+                fs.unlinkSync(filePath);
+            } catch (err) {
+                // Correction TS2769 : Fastify logger attend un objet en premier argument pour les erreurs
+                server.log.error({ err }, `Erreur suppression fichier: ${filePath}`);
+                // On continue quand même pour supprimer l'entrée en BDD
+            }
+        }
+
+        // 4. Suppression en base de données
+        try {
+            await prisma.photos.delete({ where: { id } });
+            return reply.code(204).send();
+        } catch (err) {
+            server.log.error(err);
+            return reply.code(500).send({ error: "Erreur lors de la suppression en base" });
+        }
+    });
 }

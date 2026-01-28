@@ -1,121 +1,90 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useSync } from '../context/SyncContext';
-import type { SyncActionType } from '../context/SyncContext';
+import { useSync, type SyncActionType } from '../context/SyncContext';
+import { logCacheStore } from '../services/cacheLogger';
 
-interface SafeMutationOptions {
-    mutationFn: (variables: any) => Promise<any>;
-    syncType: SyncActionType;
-    queryKey: string[];
-    onSuccess?: () => void;
-    invalidates?: string[];
+interface SafeMutationOptions<TData, TVariables> {
+    mutationFn: (variables: TVariables) => Promise<TData>;
+    syncType: SyncActionType; // Typage strict ici
+    queryKey?: string[];
+    onSuccess?: (data: TData, variables: TVariables) => void;
+    onError?: (error: any) => void;
 }
 
-export function useSafeMutation({ mutationFn, syncType, queryKey, onSuccess }: SafeMutationOptions) {
-    const { addToQueue, isOnline } = useSync();
+export function useSafeMutation<TData = any, TVariables = any>({
+                                                                   mutationFn,
+                                                                   syncType,
+                                                                   queryKey,
+                                                                   onSuccess,
+                                                                   onError
+                                                               }: SafeMutationOptions<TData, TVariables>) {
+    const { isOnline, addToQueue } = useSync();
     const queryClient = useQueryClient();
 
-    // 🔥 VERSION SIMPLIFIÉE ET GARANTIE DE FONCTIONNER
     return useMutation({
-        mutationFn: async (variables: any) => {
-            console.log("🔍 [useSafeMutation] Début de la mutation");
-            console.log("🔍 [useSafeMutation] isOnline:", isOnline);
-            console.log("🔍 [useSafeMutation] navigator.onLine:", navigator.onLine);
-            console.log("🔍 [useSafeMutation] variables:", variables);
-
-            // Vérification simple et directe
-            const actuallyOnline = isOnline && navigator.onLine;
-
-            console.log("🔍 [useSafeMutation] actuallyOnline:", actuallyOnline);
-
-            if (!actuallyOnline) {
-                console.log("📡 [useSafeMutation] Mode OFFLINE confirmé - Ajout à la queue");
-
-                // Ajout à la queue
+        mutationFn: async (variables: TVariables) => {
+            // 1. Si on est hors ligne, on ajoute directement à la file d'attente
+            if (!isOnline) {
+                console.log(`📡 [useSafeMutation] Hors-ligne détecté. Ajout à la queue : ${syncType}`);
                 addToQueue(syncType, variables);
-
-                console.log("✅ [useSafeMutation] Ajouté à la queue, retour immédiat");
-
-                // Retour immédiat avec un objet qui indique le mode offline
-                return {
-                    ...variables,
-                    id: `temp-${Date.now()}`,
-                    isOffline: true,
-                    _immediate: true
-                };
+                // Log la mutation offline
+                if (queryKey) {
+                    logCacheStore(queryKey, variables, 'offline-mutation');
+                }
+                // On retourne une fausse promesse résolue pour ne pas déclencher onError
+                return Promise.resolve({ offline: true } as any);
             }
 
-            console.log("🌐 [useSafeMutation] Mode ONLINE - Tentative d'appel API");
-
-            // Tentative d'appel API
+            // 2. Si on est en ligne, on tente la requête
             try {
                 const result = await mutationFn(variables);
-                console.log("✅ [useSafeMutation] API call SUCCESS:", result);
                 return result;
             } catch (error: any) {
-                console.error("❌ [useSafeMutation] API call FAILED:", error);
+                console.error(`❌ [useSafeMutation] API call FAILED:`, error);
 
-                // Vérifier si c'est une erreur réseau
-                const isNetworkError = !error.response ||
+                // 3. Détection fine de l'erreur réseau
+                const isNetworkError =
+                    !error.response ||
+                    error.code === 'ERR_NETWORK' ||
                     error.code === 'ECONNABORTED' ||
                     error.message === 'Network Error';
 
-                console.log("🔍 [useSafeMutation] isNetworkError:", isNetworkError);
+                console.log(`🔍 [useSafeMutation] isNetworkError: ${isNetworkError}`);
 
                 if (isNetworkError) {
-                    console.log("📡 [useSafeMutation] Erreur réseau - Fallback vers queue");
-
+                    console.warn(`📡 [useSafeMutation] Erreur réseau détectée. Fallback vers Queue.`);
                     addToQueue(syncType, variables);
-
-                    return {
-                        ...variables,
-                        id: `temp-${Date.now()}`,
-                        isOffline: true,
-                        _immediate: true
-                    };
+                    // Log la mutation offline (fallback réseau)
+                    if (queryKey) {
+                        logCacheStore(queryKey, variables, 'offline-mutation');
+                    }
+                    return Promise.resolve({ offline: true } as any);
                 }
 
-                // Erreur métier - on laisse remonter
-                console.log("🚫 [useSafeMutation] Erreur métier - throw");
+                // 4. Si c'est une erreur métier, on throw pour que l'UI gère l'erreur
+                console.log(`🚫 [useSafeMutation] Erreur métier - throw`);
                 throw error;
             }
         },
-        retry: false, // IMPORTANT: Pas de retry
-        onSuccess: (data, variables, context) => {
-            console.log("🎉 [useSafeMutation] onSuccess appelé");
-            console.log("🎉 [useSafeMutation] data:", data);
+        onSuccess: (data, variables, _context) => {
+            // Si c'était une action offline
+            if (data && (data as any).offline) {
+                if (onSuccess) onSuccess(data, variables);
+                return;
+            }
 
-            // Si mode offline (détecté par le flag)
-            if (data?.isOffline || data?._immediate) {
-                console.log("💾 [useSafeMutation] Mise à jour optimiste du cache");
-
-                // Mise à jour optimiste du cache
-                queryClient.setQueryData(queryKey, (oldData: any) => {
-                    if (Array.isArray(oldData)) {
-                        return [data, ...oldData];
-                    }
-                    return oldData;
-                });
-            } else {
-                console.log("🔄 [useSafeMutation] Invalidation du cache");
-                // Invalidation normale
+            // Succès réel
+            if (queryKey) {
                 queryClient.invalidateQueries({ queryKey });
             }
-
-            // Appel du callback
-            if (onSuccess) {
-                console.log("📞 [useSafeMutation] Appel du callback onSuccess");
-                onSuccess();
-            }
-
-            console.log("✅ [useSafeMutation] onSuccess terminé");
+            if (onSuccess) onSuccess(data, variables);
         },
-        onError: (error) => {
-            console.error("💥 [useSafeMutation] onError:", error);
+        onError: (error, _variables, _context) => {
+            console.error(`💥 [useSafeMutation] onError:`, error);
+            if (onError) onError(error);
         },
-        onSettled: (data, error) => {
-            console.log("🏁 [useSafeMutation] onSettled - Mutation terminée");
-            console.log("🏁 [useSafeMutation] data:", data);
-            console.log("🏁 [useSafeMutation] error:", error);
+        onSettled: (_data, _error) => {
+            // Logs de debug optionnels
+            // console.log(`🏁 [useSafeMutation] onSettled`);
         }
     });
 }
