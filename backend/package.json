@@ -6,6 +6,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon --exec ts-node src/index.ts",
+    "build": "tsc",
     "create-admin": "ts-node prisma/create-admin.ts"
   },
   "keywords": [],

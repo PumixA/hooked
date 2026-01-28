@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
-import { ArrowLeft, Plus, Trash2, User, Shield, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Plus, User, Shield, ChevronRight } from 'lucide-react';
 
 interface UserData {
     id: string;

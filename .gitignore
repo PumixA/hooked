@@ -18,3 +18,7 @@ build/
 # Docker volumes & data (On ne versionne pas la BDD !)
 postgres_data/
 docker-init/
+
+# Nginx Proxy Manager data
+npm_data/
+npm_letsencrypt/

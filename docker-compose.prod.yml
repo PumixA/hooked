@@ -1,0 +1,67 @@
+services:
+  # --- 1. Base de données ---
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - hooked-network
+
+  # --- 2. Backend (API) ---
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: always
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+      PORT: 3000
+      HOST: "0.0.0.0"
+    volumes:
+      - ./backend/uploads:/app/uploads
+    depends_on:
+      - db
+    networks:
+      - hooked-network
+
+  # --- 3. Frontend (Static Files) ---
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: always
+    depends_on:
+      - backend
+    networks:
+      - hooked-network
+
+  # --- 4. Nginx Proxy Manager (Le remplaçant de Caddy) ---
+  npm:
+    image: 'jc21/nginx-proxy-manager:latest'
+    restart: unless-stopped
+    ports:
+      - '9080:80'    # HTTP (Arrivée de la Freebox port 80)
+      - '9443:443'   # HTTPS (Arrivée de la Freebox port 33443)
+      - '81:81'      # Interface d'administration
+    volumes:
+      - ./npm_data:/data
+      - ./npm_letsencrypt:/etc/letsencrypt
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - hooked-network
+
+volumes:
+  db_data:
+
+networks:
+  hooked-network:
+    driver: bridge
