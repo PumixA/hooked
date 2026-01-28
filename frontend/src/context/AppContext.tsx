@@ -20,6 +20,7 @@ export interface AppSettings {
 export interface ConnectedAccount {
     id: string;
     email: string;
+    role?: string; // Ajout du rôle
 }
 
 interface AppContextType {
@@ -192,5 +193,6 @@ export const useSyncStatus = () => {
         syncEnabled: settings.syncEnabled,
         isSyncActive,
         accountEmail: account?.email || null,
+        accountRole: account?.role || null, // Ajout de l'exposition du rôle
     };
 };

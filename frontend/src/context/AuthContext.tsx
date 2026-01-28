@@ -1,5 +1,5 @@
 /**
- * AuthContext - Gestion de l'authentification OPTIONNELLE
+ * AuthContext - Gestion des authentification OPTIONNELLE
  *
  * L'authentification sert uniquement à:
  * - Connecter un compte pour activer la synchronisation cloud
@@ -41,6 +41,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             const account: ConnectedAccount = {
                 id: data.user.id,
                 email: data.user.email,
+                role: data.user.role // Ajout du rôle
             };
             setAccount(account);
 
@@ -77,6 +78,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             const account: ConnectedAccount = {
                 id: data.user.id,
                 email: data.user.email,
+                role: data.user.role // Ajout du rôle
             };
             setAccount(account);
             updateSettings({ syncEnabled: true });

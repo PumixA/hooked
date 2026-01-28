@@ -8,6 +8,8 @@ import ProjectCreate from './pages/ProjectCreate';
 import ProjectDetail from './pages/ProjectDetail';
 import MaterialCreate from './pages/MaterialCreate';
 import MaterialEdit from './pages/MaterialEdit';
+import AdminUsers from './pages/AdminUsers';
+import AdminUserDetail from './pages/AdminUserDetail';
 
 /**
  * App - Routing principal
@@ -38,6 +40,10 @@ function App() {
 
                 {/* PAGE DE CONNEXION - Accessible depuis parametres */}
                 <Route path="/login" element={<Login />} />
+
+                {/* ADMINISTRATION */}
+                <Route path="/admin/users" element={<AdminUsers />} />
+                <Route path="/admin/users/:id" element={<AdminUserDetail />} />
             </Route>
 
             {/* Redirection par defaut vers le dashboard */}
