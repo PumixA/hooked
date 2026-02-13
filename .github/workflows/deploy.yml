@@ -39,16 +39,13 @@ jobs:
         working-directory: backend
 
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: lint-and-build
     steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USER }}
-          password: ${{ secrets.SSH_PASSWORD }}
-          script: |
-            cd ${{ secrets.DEPLOY_PATH }}
-            git pull origin main
-            docker compose -f docker-compose.prod.yml up -d --build
+      - uses: actions/checkout@v4
+
+      - name: Deploy
+        run: |
+          cd /opt/hooked
+          git pull origin main
+          docker compose -f docker-compose.prod.yml up -d --build
