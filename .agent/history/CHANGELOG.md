@@ -1,0 +1,34 @@
+# Agent Changelog
+
+> Append-only log of all agent actions. Every AI agent MUST add an entry after each modification.
+>
+> **Format**: `[YYYY-MM-DD HH:MM] <agent-id> | <type>(<scope>): <description>`
+>
+> **Valid agent IDs**: `claude-code`, `codex`, `gemini`, `copilot`, `human`
+>
+> **Valid types**: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `ci`, `build`, `perf`
+
+---
+
+<!-- Entries below this line. Group by date. Most recent date on top. -->
+
+## 2026-02-13
+
+- [2026-02-13 10:30] claude-code | ci(deploy): switch deploy job from SSH to self-hosted GitHub Actions runner
+- [2026-02-13 10:20] claude-code | chore(server): install and configure self-hosted GitHub Actions runner as systemd service
+- [2026-02-13 09:20] claude-code | fix(backend): copy Prisma generated client to production Docker stage
+- [2026-02-13 09:00] claude-code | chore(server): setup production server — clone repo, restore data, configure SSH deploy key
+- [2026-02-13 08:30] claude-code | chore(git): migrate remote from hooked-pwa.git to hooked.git, tag v1.0.0
+- [2026-02-13 08:00] claude-code | fix(frontend): fix 143 ESLint errors — replace all `any` types with proper TypeScript types across 15 files
+- [2026-02-13 07:30] claude-code | chore(git): remove .env.prod and dev-dist/ from git tracking (security + cleanup)
+
+## 2026-02-12
+
+- [2026-02-12 21:00] claude-code | ci(cicd): implement CI/CD pipeline with GitHub Actions deploy + release workflows
+- [2026-02-12 21:00] claude-code | fix(frontend): replace hardcoded API URL with VITE_API_URL env variable + /api fallback
+- [2026-02-12 21:00] claude-code | feat(frontend): add nginx.conf for SPA routing + API/uploads reverse proxy
+- [2026-02-12 21:00] claude-code | fix(frontend): update Dockerfile to copy nginx.conf + inject VITE_API_URL build arg
+- [2026-02-12 21:00] claude-code | feat(frontend): add Vite dev proxy for /api and /uploads
+- [2026-02-12 21:00] claude-code | chore(gitignore): add .env.prod to gitignore
+- [2026-02-12 21:00] claude-code | docs(cicd): update spec/cicd.md with full pipeline documentation
+- [2026-02-12 19:30] claude-code | docs(docs): initialize .agent/ documentation system from agent-template, adapted to hooked project
