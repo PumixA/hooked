@@ -9,6 +9,7 @@
  */
 
 import { createContext, useState, useContext, type ReactNode } from 'react';
+import { isAxiosError } from 'axios';
 import api from '../services/api';
 import { useApp, type ConnectedAccount } from './AppContext';
 
@@ -50,13 +51,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
             console.log('✅ [Auth] Connexion réussie:', email);
             return { success: true };
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('❌ [Auth] Erreur de connexion:', error);
 
             let errorMessage = 'Erreur de connexion';
-            if (error.response?.status === 401) {
+            if (isAxiosError(error) && error.response?.status === 401) {
                 errorMessage = 'Email ou mot de passe incorrect';
-            } else if (!error.response) {
+            } else if (isAxiosError(error) && !error.response) {
                 errorMessage = 'Impossible de joindre le serveur. Vérifiez votre connexion.';
             }
 
@@ -85,13 +86,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
             console.log('✅ [Auth] Inscription réussie:', email);
             return { success: true };
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('❌ [Auth] Erreur d\'inscription:', error);
 
             let errorMessage = 'Erreur d\'inscription';
-            if (error.response?.status === 409) {
+            if (isAxiosError(error) && error.response?.status === 409) {
                 errorMessage = 'Cet email est déjà utilisé';
-            } else if (!error.response) {
+            } else if (isAxiosError(error) && !error.response) {
                 errorMessage = 'Impossible de joindre le serveur';
             }
 

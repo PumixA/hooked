@@ -3,13 +3,32 @@
  * Permet de tracer tous les stockages en cache et d'afficher l'état complet
  */
 
+import type { QueryClient } from '@tanstack/react-query';
+
+declare global {
+    interface Window {
+        __cacheDebug?: {
+            history: CacheEntry[];
+            logFull: (qc: QueryClient) => void;
+            logQueue: (q: SyncQueueItem[]) => void;
+        };
+    }
+}
+
 const CACHE_LOG_PREFIX = '📦 [CACHE]';
 
 interface CacheEntry {
     key: string;
-    data: any;
+    data: unknown;
     timestamp: number;
     source: 'api' | 'offline-mutation' | 'restored';
+}
+
+interface SyncQueueItem {
+    id: string;
+    type: string;
+    payload: unknown;
+    timestamp: number;
 }
 
 // Stockage des logs de cache pour le debugging
@@ -18,7 +37,7 @@ const cacheHistory: CacheEntry[] = [];
 /**
  * Log quand une donnée est stockée en cache
  */
-export function logCacheStore(queryKey: string[], data: any, source: 'api' | 'offline-mutation' | 'restored' = 'api') {
+export function logCacheStore(queryKey: string[], data: unknown, source: 'api' | 'offline-mutation' | 'restored' = 'api') {
     const keyString = queryKey.join('/');
     const entry: CacheEntry = {
         key: keyString,
@@ -46,7 +65,7 @@ export function logCacheStore(queryKey: string[], data: any, source: 'api' | 'of
 /**
  * Log quand une donnée est lue depuis le cache
  */
-export function logCacheRead(queryKey: string[], data: any, isFromCache: boolean) {
+export function logCacheRead(queryKey: string[], data: unknown, isFromCache: boolean) {
     const keyString = queryKey.join('/');
     const emoji = isFromCache ? '💾' : '🌐';
     console.log(
@@ -59,7 +78,7 @@ export function logCacheRead(queryKey: string[], data: any, isFromCache: boolean
 /**
  * Affiche un tableau complet de tout le cache actuel
  */
-export function logFullCache(queryClient: any) {
+export function logFullCache(queryClient: QueryClient) {
     const cache = queryClient.getQueryCache();
     const queries = cache.getAll();
 
@@ -70,10 +89,10 @@ export function logFullCache(queryClient: any) {
     if (queries.length === 0) {
         console.log('  (vide)');
     } else {
-        const cacheTable: any[] = [];
+        const cacheTable: Record<string, unknown>[] = [];
 
-        queries.forEach((query: any) => {
-            const key = query.queryKey.join('/');
+        queries.forEach((query) => {
+            const key = (query.queryKey as string[]).join('/');
             const state = query.state;
             const dataPreview = state.data
                 ? (Array.isArray(state.data)
@@ -98,8 +117,8 @@ export function logFullCache(queryClient: any) {
 
         // Afficher les données complètes
         console.log('\n📋 Données détaillées:');
-        queries.forEach((query: any) => {
-            console.log(`\n  [${query.queryKey.join('/')}]:`, query.state.data);
+        queries.forEach((query) => {
+            console.log(`\n  [${(query.queryKey as string[]).join('/')}]:`, query.state.data);
         });
     }
 
@@ -109,7 +128,7 @@ export function logFullCache(queryClient: any) {
 /**
  * Log la file de sync
  */
-export function logSyncQueue(queue: any[]) {
+export function logSyncQueue(queue: SyncQueueItem[]) {
     console.log('\n' + '='.repeat(60));
     console.log(`${CACHE_LOG_PREFIX} 📤 FILE DE SYNCHRONISATION`);
     console.log('='.repeat(60));
@@ -143,9 +162,9 @@ export function logOfflineStatus(isOnline: boolean, queueLength: number, cacheSi
 
 // Exposer pour le debugging dans la console
 if (typeof window !== 'undefined') {
-    (window as any).__cacheDebug = {
+    window.__cacheDebug = {
         history: cacheHistory,
-        logFull: (qc: any) => logFullCache(qc),
-        logQueue: (q: any[]) => logSyncQueue(q)
+        logFull: (qc: QueryClient) => logFullCache(qc),
+        logQueue: (q: SyncQueueItem[]) => logSyncQueue(q)
     };
 }

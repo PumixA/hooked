@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { isAxiosError } from 'axios';
 import { useSync, type SyncActionType } from '../context/SyncContext';
 import { logCacheStore } from '../services/cacheLogger';
 
@@ -7,10 +8,10 @@ interface SafeMutationOptions<TData, TVariables> {
     syncType: SyncActionType; // Typage strict ici
     queryKey?: string[];
     onSuccess?: (data: TData, variables: TVariables) => void;
-    onError?: (error: any) => void;
+    onError?: (error: unknown) => void;
 }
 
-export function useSafeMutation<TData = any, TVariables = any>({
+export function useSafeMutation<TData = unknown, TVariables = unknown>({
                                                                    mutationFn,
                                                                    syncType,
                                                                    queryKey,
@@ -31,22 +32,23 @@ export function useSafeMutation<TData = any, TVariables = any>({
                     logCacheStore(queryKey, variables, 'offline-mutation');
                 }
                 // On retourne une fausse promesse résolue pour ne pas déclencher onError
-                return Promise.resolve({ offline: true } as any);
+                return Promise.resolve({ offline: true } as TData);
             }
 
             // 2. Si on est en ligne, on tente la requête
             try {
                 const result = await mutationFn(variables);
                 return result;
-            } catch (error: any) {
+            } catch (error: unknown) {
                 console.error(`❌ [useSafeMutation] API call FAILED:`, error);
 
                 // 3. Détection fine de l'erreur réseau
-                const isNetworkError =
-                    !error.response ||
-                    error.code === 'ERR_NETWORK' ||
-                    error.code === 'ECONNABORTED' ||
-                    error.message === 'Network Error';
+                const isNetworkError = isAxiosError(error)
+                    ? (!error.response ||
+                       error.code === 'ERR_NETWORK' ||
+                       error.code === 'ECONNABORTED' ||
+                       error.message === 'Network Error')
+                    : false;
 
                 console.log(`🔍 [useSafeMutation] isNetworkError: ${isNetworkError}`);
 
@@ -57,7 +59,7 @@ export function useSafeMutation<TData = any, TVariables = any>({
                     if (queryKey) {
                         logCacheStore(queryKey, variables, 'offline-mutation');
                     }
-                    return Promise.resolve({ offline: true } as any);
+                    return Promise.resolve({ offline: true } as TData);
                 }
 
                 // 4. Si c'est une erreur métier, on throw pour que l'UI gère l'erreur
@@ -65,9 +67,9 @@ export function useSafeMutation<TData = any, TVariables = any>({
                 throw error;
             }
         },
-        onSuccess: (data, variables, _context) => {
+        onSuccess: (data, variables) => {
             // Si c'était une action offline
-            if (data && (data as any).offline) {
+            if (data && (data as Record<string, unknown>).offline) {
                 if (onSuccess) onSuccess(data, variables);
                 return;
             }
@@ -78,11 +80,11 @@ export function useSafeMutation<TData = any, TVariables = any>({
             }
             if (onSuccess) onSuccess(data, variables);
         },
-        onError: (error, _variables, _context) => {
+        onError: (error) => {
             console.error(`💥 [useSafeMutation] onError:`, error);
             if (onError) onError(error);
         },
-        onSettled: (_data, _error) => {
+        onSettled: () => {
             // Logs de debug optionnels
             // console.log(`🏁 [useSafeMutation] onSettled`);
         }

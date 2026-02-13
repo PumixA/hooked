@@ -159,7 +159,7 @@ export function useCreateMaterial() {
             const id = generateLocalId();
             const material = await localDb.saveMaterial({
                 id,
-                category_type: data.category_type as any,
+                category_type: data.category_type as LocalMaterial['category_type'],
                 name: data.name,
                 size: data.size,
                 brand: data.brand,

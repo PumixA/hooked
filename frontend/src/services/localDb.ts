@@ -5,6 +5,12 @@
 
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 
+declare global {
+    interface Window {
+        __localDb?: typeof localDb;
+    }
+}
+
 const DB_NAME = 'hooked-offline-db';
 const DB_VERSION = 3;
 
@@ -123,7 +129,7 @@ interface HookedOfflineDB extends DBSchema {
     };
     metadata: {
         key: string;
-        value: { key: string; value: any };
+        value: { key: string; value: unknown };
     };
     deletions: {
         key: string;
@@ -540,7 +546,7 @@ export const localDb = {
     async getLastSyncTime(): Promise<number | null> {
         const db = await getDb();
         const meta = await db.get('metadata', 'lastSync');
-        return meta?.value || null;
+        return (meta?.value as number) || null;
     },
 
     async setLastSyncTime(time: number): Promise<void> {
@@ -549,12 +555,14 @@ export const localDb = {
     },
 
     // === BULK OPERATIONS ===
+    /* eslint-disable @typescript-eslint/no-explicit-any */
     async importFromApi(data: {
         projects?: any[];
         materials?: any[];
         sessions?: any[];
         categories?: any[];
     }): Promise<void> {
+    /* eslint-enable @typescript-eslint/no-explicit-any */
         const db = await getDb();
 
         // Récupérer les suppressions locales pour ne pas re-télécharger des éléments supprimés
@@ -835,5 +843,5 @@ export const localDb = {
 
 // Exposer pour debug console
 if (typeof window !== 'undefined') {
-    (window as any).__localDb = localDb;
+    window.__localDb = localDb;
 }

@@ -3,6 +3,17 @@ import { useQueryClient } from '@tanstack/react-query';
 import { setOfflineMode } from '../services/api';
 import { syncService } from '../services/syncService';
 
+declare global {
+    interface Window {
+        __hooked?: {
+            logCache: () => void;
+            syncNow: () => Promise<void>;
+            isOnline: boolean;
+            queueLength: number;
+        };
+    }
+}
+
 // --- TYPES ---
 export type SyncActionType =
     | 'CREATE_PROJECT'
@@ -20,14 +31,14 @@ export type SyncActionType =
 export interface SyncItem {
     id: string;
     type: SyncActionType;
-    payload: any;
+    payload: unknown;
     timestamp: number;
 }
 
 interface SyncContextType {
     isOnline: boolean;
     queue: SyncItem[];
-    addToQueue: (type: SyncActionType, payload: any) => void;
+    addToQueue: (type: SyncActionType, payload: unknown) => void;
     syncNow: () => Promise<void>;
     isSyncing: boolean;
     logCache: () => void;
@@ -101,7 +112,7 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, []);
 
     // Legacy: addToQueue (pour composants non migrés)
-    const addToQueue = useCallback((type: SyncActionType, payload: any) => {
+    const addToQueue = useCallback((type: SyncActionType, payload: unknown) => {
         const newItem: SyncItem = {
             id: generateId(),
             type,
@@ -119,8 +130,8 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.log('Queue legacy:', queue.length);
         console.log('React Query cache:', queryClient.getQueryCache().getAll().length, 'entries');
         // Utiliser le debug de localDb
-        if ((window as any).__localDb) {
-            (window as any).__localDb.debugDump();
+        if (window.__localDb) {
+            window.__localDb.debugDump();
         }
     }, [queryClient, queue]);
 
@@ -147,7 +158,7 @@ export const SyncProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Exposer les fonctions de debug
     useEffect(() => {
-        (window as any).__hooked = {
+        window.__hooked = {
             logCache,
             syncNow,
             isOnline,

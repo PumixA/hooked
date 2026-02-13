@@ -338,7 +338,7 @@ export default function ProjectDetail() {
         const currentRow = project.current_row || 0;
         const newCount = Math.max(0, currentRow + amount);
 
-        let updates: any = {
+        const updates: { id: string; current_row: number; status?: string; end_date?: string } = {
             id,
             current_row: newCount
         };
@@ -352,7 +352,7 @@ export default function ProjectDetail() {
         }
 
         // Mise à jour optimiste locale
-        queryClient.setQueryData(['projects', id], (old: any) => ({
+        queryClient.setQueryData(['projects', id], (old: Record<string, unknown>) => ({
             ...old,
             ...updates
         }));
@@ -376,7 +376,7 @@ export default function ProjectDetail() {
 
         // Si le projet est terminé et qu'on augmente l'objectif au-delà du nombre de rangs actuel,
         // remettre automatiquement le projet en cours
-        const updates: any = {
+        const updates: { id: string; title: string; goal_rows: number | undefined; total_duration: number; status?: string; end_date?: string | undefined } = {
             id,
             title: tempTitle,
             goal_rows: newGoal,
@@ -429,7 +429,7 @@ export default function ProjectDetail() {
     const toggleMaterial = (materialId: string) => {
         setSelectedMaterialIds(prev =>
             prev.includes(materialId)
-                ? prev.filter(id => id !== materialId)
+                ? prev.filter(mid => mid !== materialId)
                 : [...prev, materialId]
         );
     };

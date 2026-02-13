@@ -12,8 +12,15 @@
  * - Apres creation, on migre l'ID local vers l'UUID serveur
  */
 
+import { isAxiosError } from 'axios';
 import api from './api';
-import { localDb } from './localDb';
+import { localDb, type LocalProject } from './localDb';
+
+declare global {
+    interface Window {
+        __syncService?: typeof syncService;
+    }
+}
 
 export interface SyncResult {
     success: boolean;
@@ -155,9 +162,10 @@ class SyncService {
             this.notifyStatus('Synchronisation terminee');
             console.log('[Sync] Terminee:', result);
 
-        } catch (error: any) {
+        } catch (error: unknown) {
             result.success = false;
-            result.errors.push(error.message || 'Erreur inconnue');
+            const message = error instanceof Error ? error.message : 'Erreur inconnue';
+            result.errors.push(message);
             this.notifyStatus('Erreur de synchronisation');
             console.error('[Sync] Erreur:', error);
         } finally {
@@ -175,7 +183,7 @@ class SyncService {
             try {
                 if (project._isLocal) {
                     // Nouveau projet -> POST sans l'ID (le serveur le genere)
-                    const createData: any = {
+                    const createData: Record<string, unknown> = {
                         title: project.title,
                         goal_rows: project.goal_rows,
                         current_row: project.current_row || 0,
@@ -223,7 +231,7 @@ class SyncService {
 
                 } else if (!isLocalId(project.id)) {
                     // Projet existant sur serveur -> PATCH
-                    const updateData: any = {
+                    const updateData: Record<string, unknown> = {
                         title: project.title,
                         current_row: project.current_row,
                         goal_rows: project.goal_rows,
@@ -253,9 +261,9 @@ class SyncService {
                     result.pushed.projects++;
                     console.log(`[Sync] Projet maj: ${project.title}`);
                 }
-            } catch (error: any) {
-                const errorMsg = error.response?.data?.message || error.message;
-                console.error(`[Sync] Erreur projet ${project.title}:`, error.response?.data || errorMsg);
+            } catch (error: unknown) {
+                const errorMsg = isAxiosError(error) ? (error.response?.data?.message || error.message) : (error instanceof Error ? error.message : 'Unknown error');
+                console.error(`[Sync] Erreur projet ${project.title}:`, isAxiosError(error) ? error.response?.data : errorMsg);
                 result.errors.push(`Projet ${project.title}: ${errorMsg}`);
             }
         }
@@ -296,9 +304,10 @@ class SyncService {
                     await localDb.markMaterialSynced(material.id);
                     result.pushed.materials++;
                 }
-            } catch (error: any) {
-                console.error(`[Sync] Erreur materiel:`, error.response?.data || error.message);
-                result.errors.push(`Materiel ${material.name}: ${error.message}`);
+            } catch (error: unknown) {
+                const errorMsg = isAxiosError(error) ? (error.response?.data?.message || error.message) : (error instanceof Error ? error.message : 'Unknown error');
+                console.error(`[Sync] Erreur materiel:`, isAxiosError(error) ? error.response?.data : errorMsg);
+                result.errors.push(`Materiel ${material.name}: ${errorMsg}`);
             }
         }
     }
@@ -347,9 +356,10 @@ class SyncService {
                     await localDb.markSessionSynced(session.id);
                     result.pushed.sessions++;
                 }
-            } catch (error: any) {
-                console.error(`[Sync] Erreur session:`, error.response?.data || error.message);
-                result.errors.push(`Session: ${error.message}`);
+            } catch (error: unknown) {
+                const errorMsg = isAxiosError(error) ? (error.response?.data?.message || error.message) : (error instanceof Error ? error.message : 'Unknown error');
+                console.error(`[Sync] Erreur session:`, isAxiosError(error) ? error.response?.data : errorMsg);
+                result.errors.push(`Session: ${errorMsg}`);
             }
         }
     }
@@ -407,9 +417,10 @@ class SyncService {
                     result.pushed.photos++;
                     console.log(`[Sync] Photo uploadée: ${photo.id}`);
                 }
-            } catch (error: any) {
-                console.error(`[Sync] Erreur photo:`, error.response?.data || error.message);
-                result.errors.push(`Photo: ${error.message}`);
+            } catch (error: unknown) {
+                const errorMsg = isAxiosError(error) ? (error.response?.data?.message || error.message) : (error instanceof Error ? error.message : 'Unknown error');
+                console.error(`[Sync] Erreur photo:`, isAxiosError(error) ? error.response?.data : errorMsg);
+                result.errors.push(`Photo: ${errorMsg}`);
             }
         }
     }
@@ -447,15 +458,16 @@ class SyncService {
                 await localDb.clearDeletion(deletion.id);
                 result.pushed.deletions++;
                 console.log(`[Sync] Suppression synchronisée: ${deletion.entity_type} ${deletion.entity_id}`);
-            } catch (error: any) {
+            } catch (error: unknown) {
                 // 404 = déjà supprimé sur le serveur, on peut nettoyer localement
-                if (error.response?.status === 404) {
+                if (isAxiosError(error) && error.response?.status === 404) {
                     console.log(`[Sync] Déjà supprimé sur serveur: ${deletion.entity_type} ${deletion.entity_id}`);
                     await localDb.clearDeletion(deletion.id);
                     result.pushed.deletions++;
                 } else {
-                    console.error(`[Sync] Erreur suppression ${deletion.entity_type}:`, error.response?.data || error.message);
-                    result.errors.push(`Suppression ${deletion.entity_type}: ${error.message}`);
+                    const errorMsg = isAxiosError(error) ? (error.response?.data?.message || error.message) : (error instanceof Error ? error.message : 'Unknown error');
+                    console.error(`[Sync] Erreur suppression ${deletion.entity_type}:`, isAxiosError(error) ? error.response?.data : errorMsg);
+                    result.errors.push(`Suppression ${deletion.entity_type}: ${errorMsg}`);
                 }
             }
         }
@@ -521,8 +533,9 @@ class SyncService {
                     }
                 }
             }
-        } catch (error: any) {
-            console.warn(`[Sync] Pull projets echoue:`, error.message);
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            console.warn(`[Sync] Pull projets echoue:`, message);
         }
 
         try {
@@ -532,8 +545,9 @@ class SyncService {
                 await localDb.importFromApi({ materials: remoteMaterials });
                 result.pulled.materials = remoteMaterials.length;
             }
-        } catch (error: any) {
-            console.warn(`[Sync] Pull materiels echoue:`, error.message);
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            console.warn(`[Sync] Pull materiels echoue:`, message);
         }
     }
 
@@ -575,7 +589,7 @@ class SyncService {
      * Migre un projet de son ID local vers l'ID serveur
      * et met a jour toutes les entites liees
      */
-    private async migrateProjectId(localId: string, serverId: string, projectData: any): Promise<void> {
+    private async migrateProjectId(localId: string, serverId: string, projectData: LocalProject): Promise<void> {
         // 1. IMPORTANT: Recuperer les entites liees AVANT de supprimer le projet
         // (car deleteProject supprime aussi les sessions/photos liees)
         const sessions = await localDb.getSessionsByProject(localId);
@@ -716,5 +730,5 @@ class SyncService {
 export const syncService = new SyncService();
 
 if (typeof window !== 'undefined') {
-    (window as any).__syncService = syncService;
+    window.__syncService = syncService;
 }

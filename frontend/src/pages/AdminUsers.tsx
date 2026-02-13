@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { isAxiosError } from 'axios';
 import { ArrowLeft, Plus, User, Shield, ChevronRight } from 'lucide-react';
 
 interface UserData {
@@ -31,9 +32,9 @@ export default function AdminUsers() {
         try {
             const response = await api.get('/users');
             setUsers(response.data);
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error(err);
-            if (err.response?.status === 403) {
+            if (isAxiosError(err) && err.response?.status === 403) {
                 setError("Accès refusé. Vous n'êtes pas administrateur.");
             } else {
                 setError("Impossible de charger les utilisateurs.");
@@ -60,9 +61,13 @@ export default function AdminUsers() {
             setRole('user');
             setShowForm(false);
             fetchUsers();
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error(err);
-            setCreateError(err.response?.data?.error || "Erreur lors de la création");
+            if (isAxiosError(err)) {
+                setCreateError(err.response?.data?.error || "Erreur lors de la création");
+            } else {
+                setCreateError("Erreur lors de la création");
+            }
         }
     };
 

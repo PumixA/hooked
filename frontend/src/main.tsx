@@ -14,6 +14,12 @@ import { localDb } from './services/localDb';
 import { initializeDefaultData } from './services/defaultData';
 import './index.css';
 
+declare global {
+    interface Window {
+        debugStorage: () => Promise<void>;
+    }
+}
+
 // Configuration du Client Query - Offline First
 const queryClient = new QueryClient({
     defaultOptions: {
@@ -42,7 +48,7 @@ const persister = createSyncStoragePersister({
 initializeDefaultData().catch(console.error);
 
 // --- OUTILS DE DEBUG ---
-(window as any).debugStorage = async () => {
+window.debugStorage = async () => {
     console.group('DEBUG STORAGE');
 
     console.group('LocalStorage');

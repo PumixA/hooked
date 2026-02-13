@@ -8,6 +8,15 @@
 
 import { localDb, type LocalCategory } from './localDb';
 
+declare global {
+    interface Window {
+        __defaultData?: {
+            reinitialize: typeof forceReinitialize;
+            categories: LocalCategory[];
+        };
+    }
+}
+
 // Categories de projets par defaut
 // Correspondent aux categories de la base de donnees serveur
 const DEFAULT_CATEGORIES: LocalCategory[] = [
@@ -80,7 +89,7 @@ export async function forceReinitialize(): Promise<void> {
 
 // Exposer pour debug
 if (typeof window !== 'undefined') {
-    (window as any).__defaultData = {
+    window.__defaultData = {
         reinitialize: forceReinitialize,
         categories: DEFAULT_CATEGORIES,
     };

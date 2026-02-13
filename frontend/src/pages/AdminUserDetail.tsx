@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../services/api';
+import { isAxiosError } from 'axios';
 import { ArrowLeft, Save, User, Shield, Calendar, Package, FolderOpen, Key } from 'lucide-react';
 
 interface UserDetail {
@@ -41,7 +42,7 @@ export default function AdminUserDetail() {
             setUser(userData);
             setEmail(userData.email);
             setRole(userData.role);
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error(err);
             setError("Impossible de charger l'utilisateur.");
         } finally {
@@ -55,7 +56,7 @@ export default function AdminUserDetail() {
         setSuccessMsg('');
 
         try {
-            const updateData: any = {
+            const updateData: { email: string; role: string; password?: string } = {
                 email,
                 role
             };
@@ -71,9 +72,13 @@ export default function AdminUserDetail() {
             
             // Effacer le message de succès après 3 secondes
             setTimeout(() => setSuccessMsg(''), 3000);
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error(err);
-            setError(err.response?.data?.error || "Erreur lors de la mise à jour");
+            if (isAxiosError(err)) {
+                setError(err.response?.data?.error || "Erreur lors de la mise à jour");
+            } else {
+                setError("Erreur lors de la mise à jour");
+            }
         }
     };
 
