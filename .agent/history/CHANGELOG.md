@@ -14,6 +14,7 @@
 
 ## 2026-02-13
 
+- [2026-02-13 20:04] codex | chore(git): commit v2.1 stability, cover sync, and notification foundation changes on fix/android-timer-dashboard-stability
 - [2026-02-13 19:24] codex | fix(ui): remove dashboard row counters, reduce residual scroll, and re-enable login entry in settings
 - [2026-02-13 18:59] codex | fix(pwa): switch to hash routing and stabilize android reload + timer runtime persistence
 - [2026-02-13 18:59] codex | feat(projects): add project cover upload/remove with offline-first sync support
