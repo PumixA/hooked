@@ -159,7 +159,7 @@ export default function Dashboard() {
     }
 
     return (
-        <div className="flex flex-col h-[100dvh] bg-background text-white animate-fade-in overflow-hidden">
+        <div className="flex flex-col h-[calc(100dvh-5rem)] bg-background text-white animate-fade-in overflow-hidden">
 
             {/* --- HEADER FIXE --- */}
             <div className="p-4 z-10 bg-background">
@@ -167,7 +167,7 @@ export default function Dashboard() {
                 <div className="flex justify-between items-center pt-2">
                     <div className="flex items-center gap-2">
                         <img src="/logo-mini.svg" className="w-8 h-8" alt="Logo" />
-                        <h1 className="text-2xl font-bold">Bonjour preprod !</h1>
+                        <h1 className="text-2xl font-bold">Bonjour !</h1>
                     </div>
                     <button onClick={() => navigate('/settings')} className="p-2 rounded-full bg-secondary text-gray-400 hover:text-white transition">
                         <Settings size={20} />
@@ -233,8 +233,8 @@ export default function Dashboard() {
                                     className={`pointer-events-none ${lastProject.cover_base64 || lastProject.cover_file_path ? 'absolute inset-0 w-full h-full object-cover opacity-20' : 'absolute top-3 right-3 w-16 h-16 opacity-50'}`}
                                     onError={(event) => {
                                         const target = event.currentTarget;
-                                        if (target.src.endsWith('/logo.svg')) return;
-                                        target.src = '/logo.svg';
+                                        if (target.src.endsWith('/logo-mini.svg')) return;
+                                        target.src = '/logo-mini.svg';
                                     }}
                                 />
                                 {(lastProject.cover_base64 || lastProject.cover_file_path) && (

@@ -12,12 +12,12 @@ import NetworkStatus from '../components/NetworkStatus';
  */
 export default function AppLayout() {
     return (
-        <div className="h-[100dvh] bg-background text-white overflow-hidden">
+        <div className="min-h-screen bg-background text-white">
             {/* Indicateur de statut reseau/sync */}
             <NetworkStatus />
 
             {/* Contenu des pages */}
-            <main className="h-full pb-20 overflow-hidden">
+            <main className="pb-20">
                 <Outlet />
             </main>
 

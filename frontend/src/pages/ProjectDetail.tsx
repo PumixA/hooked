@@ -7,7 +7,11 @@ import Modal from '../components/ui/Modal';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import { resolveServerFilePath } from '../services/media';
-import { requestNotificationPermission, showIncrementNotification } from '../services/lockscreenNotifications';
+import {
+    clearProjectCounterNotification,
+    requestNotificationPermission,
+    showProjectCounterNotification
+} from '../services/lockscreenNotifications';
 import {
     useProject,
     useUpdateProject,
@@ -111,20 +115,20 @@ export default function ProjectDetail() {
     const [showMaterials, setShowMaterials] = useState(false);
     const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
     const photoLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const wasTimerActiveRef = useRef(false);
+    const notificationPermissionRequestedRef = useRef(false);
 
     const [tempGoal, setTempGoal] = useState<string>('');
     const [tempTitle, setTempTitle] = useState<string>('');
     const [tempTimer, setTempTimer] = useState<string>('');
     const [noteContent, setNoteContent] = useState('');
-    const [coverPreview, setCoverPreview] = useState<string>('/logo.svg');
+    const [coverPreview, setCoverPreview] = useState<string>('/logo-mini.svg');
 
     useEffect(() => {
         if (project) {
             setTempGoal(project.goal_rows ? project.goal_rows.toString() : '');
             setTempTitle(project.title);
             setSelectedMaterialIds(project.material_ids || []);
-            setCoverPreview(project.cover_base64 || resolveServerFilePath(project.cover_file_path) || '/logo.svg');
+            setCoverPreview(project.cover_base64 || resolveServerFilePath(project.cover_file_path) || '/logo-mini.svg');
         }
     }, [project]);
 
@@ -181,7 +185,7 @@ export default function ProjectDetail() {
     const handleRemoveCover = () => {
         if (!id) return;
 
-        setCoverPreview('/logo.svg');
+        setCoverPreview('/logo-mini.svg');
         updateProjectMutation.mutate({
             id,
             cover_base64: undefined,
@@ -286,36 +290,51 @@ export default function ProjectDetail() {
     }, [id, project, queryClient, step, updateProjectMutation]);
 
     useEffect(() => {
-        if (!id) return;
-        if (!isActive || wasTimerActiveRef.current) {
-            wasTimerActiveRef.current = isActive;
+        if (!isActive) {
+            notificationPermissionRequestedRef.current = false;
             return;
         }
 
-        requestNotificationPermission()
-            .then((permission) => {
-                if (permission !== 'granted' || !project) return;
-                showIncrementNotification({
-                    projectId: id,
-                    projectTitle: project.title,
-                    currentRow: project.current_row || 0,
-                }).catch(console.error);
-            })
-            .catch(console.error)
-            .finally(() => {
-                wasTimerActiveRef.current = true;
-            });
-    }, [id, isActive, project]);
+        if (notificationPermissionRequestedRef.current) return;
+
+        notificationPermissionRequestedRef.current = true;
+        requestNotificationPermission().catch(console.error);
+    }, [isActive]);
+
+    useEffect(() => {
+        if (!id || !project) return;
+
+        if (!isActive) {
+            clearProjectCounterNotification(id).catch(console.error);
+            return;
+        }
+
+        if (!('Notification' in window) || Notification.permission !== 'granted') return;
+
+        showProjectCounterNotification({
+            projectId: id,
+            projectTitle: project.title,
+            currentRow: project.current_row || 0,
+        }).catch(console.error);
+    }, [id, isActive, project?.title, project?.current_row]);
 
     useEffect(() => {
         if (!('serviceWorker' in navigator) || !id) return;
 
         const onServiceWorkerMessage = (event: MessageEvent) => {
-            if (event.data?.type !== 'LOCKSCREEN_INCREMENT_ROW') return;
-            if (event.data.projectId !== id) return;
+            const message = event.data as { type?: string; projectId?: string } | undefined;
+            if (!message || message.projectId !== id) return;
 
-            updateCounter(1);
-            setToastMessage('Rang +1 depuis notification');
+            if (message.type === 'LOCKSCREEN_INCREMENT_ROW') {
+                updateCounter(1);
+                setToastMessage('Rang +1 depuis notification');
+                return;
+            }
+
+            if (message.type === 'LOCKSCREEN_DECREMENT_ROW') {
+                updateCounter(-1);
+                setToastMessage('Rang -1 depuis notification');
+            }
         };
 
         navigator.serviceWorker.addEventListener('message', onServiceWorkerMessage);
@@ -324,6 +343,13 @@ export default function ProjectDetail() {
             navigator.serviceWorker.removeEventListener('message', onServiceWorkerMessage);
         };
     }, [id, updateCounter]);
+
+    useEffect(() => {
+        return () => {
+            if (!id) return;
+            clearProjectCounterNotification(id).catch(console.error);
+        };
+    }, [id]);
 
     const handleSaveSettings = () => {
         if (!project || !id) return;
@@ -624,11 +650,11 @@ export default function ProjectDetail() {
                         <div className="rounded-xl border border-zinc-700 bg-zinc-800/40 p-3">
                             <div className="w-full aspect-[16/9] rounded-lg overflow-hidden bg-zinc-900 mb-3">
                                 <img
-                                    src={coverPreview || '/logo.svg'}
+                                    src={coverPreview || '/logo-mini.svg'}
                                     alt="Couverture du projet"
                                     className="w-full h-full object-cover"
                                     onError={(event) => {
-                                        event.currentTarget.src = '/logo.svg';
+                                        event.currentTarget.src = '/logo-mini.svg';
                                     }}
                                 />
                             </div>

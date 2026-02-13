@@ -1,4 +1,4 @@
-export interface IncrementNotificationPayload {
+export interface ProjectCounterNotificationPayload {
   projectId: string;
   projectTitle: string;
   currentRow: number;
@@ -16,13 +16,23 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
   return Notification.requestPermission();
 }
 
-export async function showIncrementNotification(payload: IncrementNotificationPayload): Promise<void> {
+export async function showProjectCounterNotification(payload: ProjectCounterNotificationPayload): Promise<void> {
   if (!('serviceWorker' in navigator)) return;
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
 
   const registration = await navigator.serviceWorker.ready;
   registration.active?.postMessage({
-    type: 'SHOW_LOCKSCREEN_INCREMENT',
+    type: 'SHOW_LOCKSCREEN_COUNTER',
     payload,
+  });
+}
+
+export async function clearProjectCounterNotification(projectId: string): Promise<void> {
+  if (!('serviceWorker' in navigator)) return;
+
+  const registration = await navigator.serviceWorker.ready;
+  registration.active?.postMessage({
+    type: 'CLEAR_LOCKSCREEN_COUNTER',
+    payload: { projectId },
   });
 }

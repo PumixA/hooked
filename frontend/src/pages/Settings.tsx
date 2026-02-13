@@ -18,6 +18,12 @@ export default function Settings() {
 
     const [showClearConfirm, setShowClearConfirm] = useState(false);
     const [currentTheme, setCurrentTheme] = useState<ThemeMode>((settings?.theme as ThemeMode) || 'dark');
+    const preprodIndicators = [
+        window.location.hostname,
+        window.location.origin,
+        import.meta.env.VITE_API_URL || ''
+    ].join(' ').toLowerCase();
+    const isPreprod = preprodIndicators.includes('preprod');
 
     // Appliquer le thème au document
     useEffect(() => {
@@ -70,6 +76,15 @@ export default function Settings() {
                 </button>
                 <h1 className="text-xl font-bold text-white">Parametres</h1>
             </div>
+
+            {isPreprod && (
+                <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3">
+                    <p className="text-amber-300 text-sm font-semibold">Environnement preprod</p>
+                    <p className="text-amber-200/80 text-xs mt-1">
+                        Cette vignette n&apos;apparait que sur la preproduction.
+                    </p>
+                </div>
+            )}
 
             {/* Section: Mode de fonctionnement */}
             <div className="space-y-3">

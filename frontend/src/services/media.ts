@@ -29,5 +29,5 @@ export function resolveServerFilePath(filePath?: string): string {
 export function getProjectVisual(coverBase64?: string, coverFilePath?: string): string {
   if (coverBase64) return coverBase64;
   if (coverFilePath) return resolveServerFilePath(coverFilePath);
-  return '/logo.svg';
+  return '/logo-mini.svg';
 }
