@@ -21,10 +21,19 @@ export async function showProjectCounterNotification(payload: ProjectCounterNoti
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
 
   const registration = await navigator.serviceWorker.ready;
-  registration.active?.postMessage({
-    type: 'SHOW_LOCKSCREEN_COUNTER',
-    payload,
-  });
+  const options = {
+    body: payload.projectTitle,
+    tag: `hooked-project-${payload.projectId}`,
+    requireInteraction: true,
+    actions: [
+      { action: 'increment-row', title: '+' },
+      { action: 'decrement-row', title: '-' },
+    ],
+    icon: '/pwa-192x192.png',
+    badge: '/logo-mini.svg',
+  } as NotificationOptions;
+
+  await registration.showNotification(`Rang ${payload.currentRow}`, options);
 }
 
 export async function clearProjectCounterNotification(projectId: string): Promise<void> {

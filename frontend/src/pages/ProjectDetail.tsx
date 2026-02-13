@@ -116,6 +116,7 @@ export default function ProjectDetail() {
     const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
     const photoLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const notificationPermissionRequestedRef = useRef(false);
+    const notificationWasActiveRef = useRef(false);
 
     const [tempGoal, setTempGoal] = useState<string>('');
     const [tempTitle, setTempTitle] = useState<string>('');
@@ -305,17 +306,28 @@ export default function ProjectDetail() {
         if (!id || !project) return;
 
         if (!isActive) {
-            clearProjectCounterNotification(id).catch(console.error);
+            if (notificationWasActiveRef.current) {
+                clearProjectCounterNotification(id).catch(console.error);
+            }
+            notificationWasActiveRef.current = false;
             return;
         }
 
         if (!('Notification' in window) || Notification.permission !== 'granted') return;
 
-        showProjectCounterNotification({
-            projectId: id,
-            projectTitle: project.title,
-            currentRow: project.current_row || 0,
-        }).catch(console.error);
+        notificationWasActiveRef.current = true;
+
+        const pushNotification = () => {
+            showProjectCounterNotification({
+                projectId: id,
+                projectTitle: project.title,
+                currentRow: project.current_row || 0,
+            }).catch(console.error);
+        };
+
+        pushNotification();
+        const refreshInterval = window.setInterval(pushNotification, 15000);
+        return () => window.clearInterval(refreshInterval);
     }, [id, isActive, project?.title, project?.current_row]);
 
     useEffect(() => {
@@ -343,13 +355,6 @@ export default function ProjectDetail() {
             navigator.serviceWorker.removeEventListener('message', onServiceWorkerMessage);
         };
     }, [id, updateCounter]);
-
-    useEffect(() => {
-        return () => {
-            if (!id) return;
-            clearProjectCounterNotification(id).catch(console.error);
-        };
-    }, [id]);
 
     const handleSaveSettings = () => {
         if (!project || !id) return;
