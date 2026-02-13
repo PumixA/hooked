@@ -14,6 +14,8 @@
 
 ## 2026-02-13
 
+- [2026-02-13 11:40] claude-code | chore(git): clean up ~30 obsolete branches (feature/hook-*, fixes, temporaryProd, develop)
+- [2026-02-13 11:40] human | chore(git): configure branch protection rules on GitHub (main: PR + 1 approval + CI, dev: PR + CI)
 - [2026-02-13 11:20] claude-code | docs(agent): update all .agent/ docs with preprod environment, DNS, network config
 - [2026-02-13 11:10] claude-code | feat(infra): add preprod environment — docker-compose.preprod.yml, deploy-preprod.yml workflow, nginx.conf.template with envsubst
 - [2026-02-13 11:00] claude-code | feat(infra): configure OVH DNS + NPM proxy host + Let's Encrypt DNS challenge for hooked-preprod.melvin-delorme.fr
