@@ -204,7 +204,7 @@ export default function Dashboard() {
                 <div className="flex justify-between items-center pt-2">
                     <div className="flex items-center gap-2">
                         <img src="/logo-mini.svg" className="w-8 h-8" alt="Logo" />
-                        <h1 className="text-2xl font-bold">Bonjour !</h1>
+                        <h1 className="text-2xl font-bold">Bonjour ! 🧶</h1>
                     </div>
                     <button onClick={() => navigate('/settings')} className="p-2 rounded-full bg-secondary text-gray-400 hover:text-white transition">
                         <Settings size={20} />
