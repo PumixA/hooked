@@ -20,6 +20,26 @@
 
 <!-- Entries below this line. Most recent on top. -->
 
+## [2026-02-13] Preprod environment with separate Docker stack
+
+- **Agent**: claude-code
+- **Context**: Need a staging/preprod environment to test changes before production. The `dev` branch should auto-deploy to a separate URL.
+- **Options considered**: (A) Same Docker stack with different ports, (B) Separate docker-compose with isolated services, (C) Separate server
+- **Decision**: Option B — `docker-compose.preprod.yml` with isolated services (`db-preprod`, `backend-preprod`, `frontend-preprod`) sharing the same Docker network as prod (for NPM access). Separate DB volume, separate uploads directory.
+- **Consequences**:
+  - New files: `docker-compose.preprod.yml`, `.github/workflows/deploy-preprod.yml`
+  - `frontend/nginx.conf` replaced by `frontend/nginx.conf.template` with `envsubst` for configurable `BACKEND_HOST`
+  - Preprod uses env vars prefixed `PREPROD_` in `.env`
+  - URL: `https://hooked-preprod.melvin-delorme.fr:33443`
+
+## [2026-02-13] Let's Encrypt DNS challenge via OVH API
+
+- **Agent**: claude-code
+- **Context**: Free ISP blocks ports 80 and 443 on residential lines (must use ports > 32768). Let's Encrypt HTTP-01 challenge requires port 80, so cannot be used.
+- **Options considered**: (A) Open port 80 — impossible (Free blocks it), (B) DNS-01 challenge via OVH API, (C) Self-signed certificates
+- **Decision**: Option B — DNS challenge using OVH API credentials in Nginx Proxy Manager. Certs auto-renew without port 80.
+- **Consequences**: OVH API keys stored in NPM config. All SSL certs for new subdomains must use DNS challenge.
+
 ## [2026-02-13] Self-hosted GitHub Actions runner for deploy
 
 - **Agent**: claude-code

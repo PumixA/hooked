@@ -14,6 +14,9 @@
 
 ## 2026-02-13
 
+- [2026-02-13 11:20] claude-code | docs(agent): update all .agent/ docs with preprod environment, DNS, network config
+- [2026-02-13 11:10] claude-code | feat(infra): add preprod environment — docker-compose.preprod.yml, deploy-preprod.yml workflow, nginx.conf.template with envsubst
+- [2026-02-13 11:00] claude-code | feat(infra): configure OVH DNS + NPM proxy host + Let's Encrypt DNS challenge for hooked-preprod.melvin-delorme.fr
 - [2026-02-13 10:30] claude-code | ci(deploy): switch deploy job from SSH to self-hosted GitHub Actions runner
 - [2026-02-13 10:20] claude-code | chore(server): install and configure self-hosted GitHub Actions runner as systemd service
 - [2026-02-13 09:20] claude-code | fix(backend): copy Prisma generated client to production Docker stage
