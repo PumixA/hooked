@@ -1,6 +1,6 @@
 # System Architecture
 
-> Version: 2.2.0
+> Version: 2.4.0
 
 ---
 
@@ -185,6 +185,7 @@ erDiagram
         INT goal_rows "nullable"
         INT increment_step "default 1"
         INT total_duration
+        VARCHAR cover_file_path "nullable"
         TIMESTAMPTZ start_date
         TIMESTAMPTZ end_date "nullable"
         TIMESTAMPTZ created_at
@@ -252,6 +253,8 @@ erDiagram
 | GET      | `/projects/:id`           | Get project details            | Required |
 | PATCH    | `/projects/:id`           | Update project                 | Required |
 | DELETE   | `/projects/:id`           | Delete project + related data  | Required |
+| POST     | `/projects/:id/cover`     | Upload project cover photo     | Required |
+| DELETE   | `/projects/:id/cover`     | Remove project cover photo     | Required |
 | GET      | `/materials`              | List materials (?category_type)| Required |
 | POST     | `/materials`              | Add material                   | Required |
 | PATCH    | `/materials/:id`          | Update material                | Required |
@@ -265,6 +268,15 @@ erDiagram
 | POST     | `/notes`                  | Create/update note             | Required |
 | DELETE   | `/notes/:id`              | Delete note                    | Required |
 | GET      | `/categories`             | List categories                | Public   |
+
+## v2.1 Technical Updates
+
+- **Routing strategy**: Frontend switched to `HashRouter` for robust Android deep-route reload in PWA mode.
+- **Timer persistence**: Stopwatch runtime state is stored in IndexedDB metadata (`timer:<projectId>`) to keep accurate elapsed time after sleep/background/reload.
+- **Dashboard visual fallback**: Project card now uses app logo by default and a custom project cover only when explicitly set in project settings.
+- **Cover data flow**: `projects.cover_file_path` stores server cover path; local mode keeps `cover_base64` for immediate offline render and sync queueing.
+- **Cover endpoints**: Backend exposes `POST /projects/:id/cover` and `DELETE /projects/:id/cover`.
+- **Notification foundation**: Service worker receives `SHOW_LOCKSCREEN_INCREMENT` and sends `LOCKSCREEN_INCREMENT_ROW` back to the client via `postMessage`.
 
 ## Security Model
 

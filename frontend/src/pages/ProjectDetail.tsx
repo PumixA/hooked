@@ -1,12 +1,13 @@
-import { useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings, TrendingUp, ImagePlus, Trash2, CheckCircle, Flag, X, ChevronLeft, ChevronRight, Check, Package, RotateCcw } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import Timer from '../components/features/Timer';
-import { localDb } from '../services/localDb';
 import Modal from '../components/ui/Modal';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
+import { resolveServerFilePath } from '../services/media';
+import { requestNotificationPermission, showIncrementNotification } from '../services/lockscreenNotifications';
 import {
     useProject,
     useUpdateProject,
@@ -20,6 +21,7 @@ import {
     useSaveSession,
     useMaterials
 } from '../hooks/useOfflineData';
+import { useProjectTimer } from '../hooks/useProjectTimer';
 
 interface Photo {
     id: string;
@@ -62,68 +64,33 @@ export default function ProjectDetail() {
     const deletePhotoMutation = useDeletePhoto();
     const saveSessionMutation = useSaveSession();
 
-    // Timer state
-    const [elapsed, setElapsed] = useState(0);
-    const [isActive, setIsActive] = useState(false);
-    const startTimeRef = useRef<number | null>(null);
-    const savedTimeRef = useRef<number>(0);
-    const [sessionStartRow, setSessionStartRow] = useState<number | null>(null);
+    const saveDuration = useCallback((seconds: number) => {
+        if (!id) return;
+        updateProjectMutation.mutate({
+            id,
+            total_duration: seconds
+        });
+    }, [id, updateProjectMutation]);
 
-    useEffect(() => {
-        if (project?.total_duration) {
-            setElapsed(project.total_duration);
-            savedTimeRef.current = project.total_duration;
-        }
-    }, [project?.total_duration]);
+    const saveSession = useCallback((payload: { project_id: string; start_time: string; end_time: string; duration_seconds: number }) => {
+        saveSessionMutation.mutate(payload);
+    }, [saveSessionMutation]);
 
-    // Sauvegarde automatique du timer toutes les 30 secondes quand actif
-    useEffect(() => {
-        if (!isActive || !project || !id) return;
-
-        const autoSaveInterval = setInterval(() => {
-            const currentElapsed = savedTimeRef.current + Math.floor((Date.now() - (startTimeRef.current || Date.now())) / 1000);
-            updateProjectMutation.mutate({ id, total_duration: currentElapsed });
-            console.log(`[Timer] Auto-save: ${currentElapsed}s`);
-        }, 30000); // Toutes les 30 secondes
-
-        return () => clearInterval(autoSaveInterval);
-    }, [isActive, project, id]);
-
-    // Sauvegarde quand la page perd le focus ou l'app est fermée
-    useEffect(() => {
-        if (!project || !id) return;
-
-        const saveOnHide = () => {
-            if (isActive && startTimeRef.current) {
-                const currentElapsed = savedTimeRef.current + Math.floor((Date.now() - startTimeRef.current) / 1000);
-                // Utiliser sendBeacon pour une sauvegarde fiable même si la page se ferme
-                localDb.saveProject({ id, total_duration: currentElapsed });
-                console.log(`[Timer] Save on visibility change: ${currentElapsed}s`);
-            }
-        };
-
-        const handleVisibilityChange = () => {
-            if (document.visibilityState === 'hidden') {
-                saveOnHide();
-            }
-        };
-
-        const handleBeforeUnload = () => {
-            saveOnHide();
-        };
-
-        document.addEventListener('visibilitychange', handleVisibilityChange);
-        window.addEventListener('beforeunload', handleBeforeUnload);
-        window.addEventListener('pagehide', handleBeforeUnload);
-
-        return () => {
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-            window.removeEventListener('beforeunload', handleBeforeUnload);
-            window.removeEventListener('pagehide', handleBeforeUnload);
-            // Sauvegarder aussi au démontage du composant
-            saveOnHide();
-        };
-    }, [isActive, project, id]);
+    const {
+        elapsed,
+        isActive,
+        sessionStartRow,
+        toggleTimer: handleToggleTimer,
+        resetTimer: handleResetTimer,
+        setElapsedFromSettings,
+    } = useProjectTimer({
+        projectId: id,
+        projectStatus: project?.status,
+        currentRow: project?.current_row,
+        initialTotalDuration: project?.total_duration,
+        onSaveDuration: saveDuration,
+        onSaveSession: saveSession,
+    });
 
     const [step, setStep] = useState(1);
     const [showNotes, setShowNotes] = useState(false);
@@ -144,17 +111,20 @@ export default function ProjectDetail() {
     const [showMaterials, setShowMaterials] = useState(false);
     const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
     const photoLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const wasTimerActiveRef = useRef(false);
 
     const [tempGoal, setTempGoal] = useState<string>('');
     const [tempTitle, setTempTitle] = useState<string>('');
     const [tempTimer, setTempTimer] = useState<string>('');
     const [noteContent, setNoteContent] = useState('');
+    const [coverPreview, setCoverPreview] = useState<string>('/logo.svg');
 
     useEffect(() => {
         if (project) {
             setTempGoal(project.goal_rows ? project.goal_rows.toString() : '');
             setTempTitle(project.title);
             setSelectedMaterialIds(project.material_ids || []);
+            setCoverPreview(project.cover_base64 || resolveServerFilePath(project.cover_file_path) || '/logo.svg');
         }
     }, [project]);
 
@@ -174,6 +144,7 @@ export default function ProjectDetail() {
     }, [noteData]);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const coverInputRef = useRef<HTMLInputElement>(null);
 
     const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
         const files = event.target.files;
@@ -187,6 +158,37 @@ export default function ProjectDetail() {
                 );
             });
         }
+    };
+
+    const handleCoverFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file || !id) return;
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            const base64 = reader.result as string;
+            setCoverPreview(base64);
+            updateProjectMutation.mutate({
+                id,
+                cover_base64: base64,
+                cover_sync_status: 'pending'
+            });
+            setToastMessage('Photo de couverture mise à jour');
+        };
+        reader.readAsDataURL(file);
+    };
+
+    const handleRemoveCover = () => {
+        if (!id) return;
+
+        setCoverPreview('/logo.svg');
+        updateProjectMutation.mutate({
+            id,
+            cover_base64: undefined,
+            cover_file_path: undefined,
+            cover_sync_status: 'pending'
+        });
+        setToastMessage('Couverture supprimée');
     };
 
     const openGallery = (index: number) => {
@@ -240,80 +242,6 @@ export default function ProjectDetail() {
         }
     };
 
-    // Timer logic
-    useEffect(() => {
-        let interval: ReturnType<typeof setInterval> | null = null;
-        if (isActive) {
-            interval = setInterval(() => {
-                const now = Date.now();
-                const currentSessionDuration = Math.floor((now - (startTimeRef.current || now)) / 1000);
-                setElapsed(savedTimeRef.current + currentSessionDuration);
-            }, 1000);
-        } else if (interval) {
-            clearInterval(interval);
-        }
-        return () => {
-            if (interval) clearInterval(interval);
-        };
-    }, [isActive]);
-
-    const handleToggleTimer = () => {
-        if (project?.status === 'completed') return;
-
-        if (isActive) {
-            const now = Date.now();
-            const start = startTimeRef.current || now;
-            const duration = Math.floor((now - start) / 1000);
-            // Calculer le temps exact au moment de l'arrêt
-            const exactElapsed = savedTimeRef.current + duration;
-
-            if (duration > 2 && project && id) {
-                saveSessionMutation.mutate({
-                    project_id: id,
-                    start_time: new Date(start).toISOString(),
-                    end_time: new Date(now).toISOString(),
-                    duration_seconds: duration
-                });
-            }
-
-            // Mettre à jour avec le temps exact
-            setElapsed(exactElapsed);
-            savedTimeRef.current = exactElapsed;
-
-            if (project && id) {
-                updateProjectMutation.mutate({
-                    id,
-                    total_duration: exactElapsed
-                });
-            }
-
-            setIsActive(false);
-        } else {
-            startTimeRef.current = Date.now();
-            setIsActive(true);
-            if (sessionStartRow === null && project && project.current_row !== undefined) {
-                setSessionStartRow(project.current_row);
-            }
-        }
-    };
-
-    const handleResetTimer = () => {
-        if (project?.status === 'completed') return;
-
-        setIsActive(false);
-        setElapsed(0);
-        savedTimeRef.current = 0;
-        startTimeRef.current = null;
-        setSessionStartRow(null);
-
-        if (project && id) {
-            updateProjectMutation.mutate({
-                id,
-                total_duration: 0
-            });
-        }
-    };
-
     const getEstimation = () => {
         if (project?.status === 'completed') return "Projet terminé ! 🎉";
         if (!project?.goal_rows || elapsed < 60 || sessionStartRow === null) return null;
@@ -331,7 +259,7 @@ export default function ProjectDetail() {
         return `Fin estimée dans ${h > 0 ? `${h}h ` : ''}${m}m`;
     };
 
-    const updateCounter = (increment: number) => {
+    const updateCounter = useCallback((increment: number) => {
         if (!project || !id || project.status === 'completed') return;
 
         const amount = increment * step;
@@ -346,9 +274,6 @@ export default function ProjectDetail() {
         if (project.goal_rows && newCount >= project.goal_rows && project.status !== 'completed') {
             updates.status = 'completed';
             updates.end_date = new Date().toISOString();
-            if (isActive) {
-                setIsActive(false);
-            }
         }
 
         // Mise à jour optimiste locale
@@ -358,7 +283,47 @@ export default function ProjectDetail() {
         }));
 
         updateProjectMutation.mutate(updates);
-    };
+    }, [id, project, queryClient, step, updateProjectMutation]);
+
+    useEffect(() => {
+        if (!id) return;
+        if (!isActive || wasTimerActiveRef.current) {
+            wasTimerActiveRef.current = isActive;
+            return;
+        }
+
+        requestNotificationPermission()
+            .then((permission) => {
+                if (permission !== 'granted' || !project) return;
+                showIncrementNotification({
+                    projectId: id,
+                    projectTitle: project.title,
+                    currentRow: project.current_row || 0,
+                }).catch(console.error);
+            })
+            .catch(console.error)
+            .finally(() => {
+                wasTimerActiveRef.current = true;
+            });
+    }, [id, isActive, project]);
+
+    useEffect(() => {
+        if (!('serviceWorker' in navigator) || !id) return;
+
+        const onServiceWorkerMessage = (event: MessageEvent) => {
+            if (event.data?.type !== 'LOCKSCREEN_INCREMENT_ROW') return;
+            if (event.data.projectId !== id) return;
+
+            updateCounter(1);
+            setToastMessage('Rang +1 depuis notification');
+        };
+
+        navigator.serviceWorker.addEventListener('message', onServiceWorkerMessage);
+
+        return () => {
+            navigator.serviceWorker.removeEventListener('message', onServiceWorkerMessage);
+        };
+    }, [id, updateCounter]);
 
     const handleSaveSettings = () => {
         if (!project || !id) return;
@@ -369,9 +334,7 @@ export default function ProjectDetail() {
 
         if (!isNaN(h) && !isNaN(m) && !isNaN(s)) {
             newElapsed = h * 3600 + m * 60 + s;
-            setElapsed(newElapsed);
-            savedTimeRef.current = newElapsed;
-            if (isActive) startTimeRef.current = Date.now();
+            setElapsedFromSettings(newElapsed);
         }
 
         // Si le projet est terminé et qu'on augmente l'objectif au-delà du nombre de rangs actuel,
@@ -523,7 +486,6 @@ export default function ProjectDetail() {
     const estimation = getEstimation();
     const isCompleted = project.status === 'completed';
     const currentRowDisplay = project.current_row || 0;
-    const API_URL = 'http://192.168.1.96:3000';
 
     return (
         <div className="h-[100dvh] w-screen bg-background text-white flex flex-col animate-fade-in overflow-hidden">
@@ -635,6 +597,14 @@ export default function ProjectDetail() {
             {/* MODALS */}
             <Modal isOpen={showSettings} onClose={() => setShowSettings(false)} title="Réglages du projet">
                 <div className="space-y-6">
+                    <input
+                        type="file"
+                        ref={coverInputRef}
+                        onChange={handleCoverFileSelect}
+                        accept="image/*"
+                        className="hidden"
+                    />
+
                     <Input label="Nom du projet" value={tempTitle} onChange={(e) => setTempTitle(e.target.value)} />
 
                     <div className="space-y-2">
@@ -648,6 +618,37 @@ export default function ProjectDetail() {
 
                     <Input label="Objectif de rangs" type="number" value={tempGoal} onChange={(e) => setTempGoal(e.target.value)} placeholder="Infini" />
                     <Input label="Temps écoulé (HH:MM:SS)" value={tempTimer} onChange={(e) => setTempTimer(e.target.value)} placeholder="00:00:00" />
+
+                    <div className="space-y-3">
+                        <label className="text-xs text-zinc-400 ml-1">Photo de couverture</label>
+                        <div className="rounded-xl border border-zinc-700 bg-zinc-800/40 p-3">
+                            <div className="w-full aspect-[16/9] rounded-lg overflow-hidden bg-zinc-900 mb-3">
+                                <img
+                                    src={coverPreview || '/logo.svg'}
+                                    alt="Couverture du projet"
+                                    className="w-full h-full object-cover"
+                                    onError={(event) => {
+                                        event.currentTarget.src = '/logo.svg';
+                                    }}
+                                />
+                            </div>
+                            <div className="flex gap-2">
+                                <Button variant="secondary" onClick={() => coverInputRef.current?.click()} className="flex-1">
+                                    Changer la couverture
+                                </Button>
+                                <button
+                                    type="button"
+                                    onClick={handleRemoveCover}
+                                    className="px-4 rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500/20 transition"
+                                >
+                                    Retirer
+                                </button>
+                            </div>
+                            <p className="text-[11px] text-zinc-500 mt-2">
+                                Par défaut, le logo de l&apos;app est affiché.
+                            </p>
+                        </div>
+                    </div>
 
                     <div className="pt-4 space-y-3">
                         <Button onClick={handleSaveSettings}>Enregistrer</Button>
@@ -734,7 +735,7 @@ export default function ProjectDetail() {
                 <div className="grid grid-cols-2 gap-3 max-h-[40vh] overflow-y-auto pr-1 scrollbar-hide select-none">
                     {photos.map((photo: Photo, index: number) => {
                         const isSelected = selectedPhotoIds.has(photo.id);
-                        const imgSrc = photo._isLocal && photo.base64 ? photo.base64 : `${API_URL}${photo.file_path}`;
+                        const imgSrc = photo._isLocal && photo.base64 ? photo.base64 : resolveServerFilePath(photo.file_path);
                         return (
                             <div
                                 key={photo.id}
@@ -766,7 +767,7 @@ export default function ProjectDetail() {
                     <div className="flex-1 flex items-center justify-center relative overflow-hidden">
                         <div className="absolute inset-y-0 left-0 w-1/4 z-10" onClick={prevPhoto} />
                         <img
-                            src={photos[selectedPhotoIndex]._isLocal && photos[selectedPhotoIndex].base64 ? photos[selectedPhotoIndex].base64 : `${API_URL}${photos[selectedPhotoIndex].file_path}`}
+                            src={photos[selectedPhotoIndex]._isLocal && photos[selectedPhotoIndex].base64 ? photos[selectedPhotoIndex].base64 : resolveServerFilePath(photos[selectedPhotoIndex].file_path)}
                             alt="Galerie"
                             className="max-w-full max-h-full object-contain"
                         />

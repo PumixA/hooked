@@ -14,6 +14,11 @@
 
 ## 2026-02-13
 
+- [2026-02-13 19:24] codex | fix(ui): remove dashboard row counters, reduce residual scroll, and re-enable login entry in settings
+- [2026-02-13 18:59] codex | fix(pwa): switch to hash routing and stabilize android reload + timer runtime persistence
+- [2026-02-13 18:59] codex | feat(projects): add project cover upload/remove with offline-first sync support
+- [2026-02-13 18:59] codex | feat(pwa): add lockscreen notification action foundation via service worker messaging
+- [2026-02-13 18:59] codex | docs(docs): update requirements/design/features/decisions for v2.1 stability and cover flow
 - [2026-02-13 10:30] claude-code | ci(deploy): switch deploy job from SSH to self-hosted GitHub Actions runner
 - [2026-02-13 10:20] claude-code | chore(server): install and configure self-hosted GitHub Actions runner as systemd service
 - [2026-02-13 09:20] claude-code | fix(backend): copy Prisma generated client to production Docker stage

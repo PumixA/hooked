@@ -27,6 +27,9 @@ export interface LocalProject {
     created_at: string;
     updated_at: string;
     end_date?: string;
+    cover_file_path?: string;
+    cover_base64?: string;
+    cover_sync_status?: 'synced' | 'pending';
     // Métadonnées de sync
     _syncStatus: 'synced' | 'pending' | 'conflict';
     _localUpdatedAt: number;
@@ -249,6 +252,14 @@ export const localDb = {
         // Sinon, garder la valeur existante
         const hasEndDateProp = 'end_date' in project;
         const endDateValue = hasEndDateProp ? project.end_date : existing?.end_date;
+        const hasCoverPathProp = 'cover_file_path' in project;
+        const coverFilePathValue = hasCoverPathProp ? project.cover_file_path : existing?.cover_file_path;
+        const hasCoverBase64Prop = 'cover_base64' in project;
+        const coverBase64Value = hasCoverBase64Prop ? project.cover_base64 : existing?.cover_base64;
+        const hasCoverSyncStatusProp = 'cover_sync_status' in project;
+        const coverSyncStatusValue = hasCoverSyncStatusProp
+            ? project.cover_sync_status
+            : (existing?.cover_sync_status ?? 'synced');
 
         const fullProject: LocalProject = {
             id: project.id,
@@ -262,6 +273,9 @@ export const localDb = {
             created_at: existing?.created_at || project.created_at || new Date().toISOString(),
             updated_at: new Date().toISOString(),
             end_date: endDateValue,
+            cover_file_path: coverFilePathValue,
+            cover_base64: coverBase64Value,
+            cover_sync_status: coverSyncStatusValue,
             _syncStatus: syncStatus,
             _localUpdatedAt: now,
             _isLocal: project._isLocal ?? existing?._isLocal ?? true,
@@ -554,6 +568,22 @@ export const localDb = {
         await db.put('metadata', { key: 'lastSync', value: time });
     },
 
+    async getMetadata<T>(key: string): Promise<T | null> {
+        const db = await getDb();
+        const meta = await db.get('metadata', key);
+        return (meta?.value as T) ?? null;
+    },
+
+    async setMetadata<T>(key: string, value: T): Promise<void> {
+        const db = await getDb();
+        await db.put('metadata', { key, value });
+    },
+
+    async removeMetadata(key: string): Promise<void> {
+        const db = await getDb();
+        await db.delete('metadata', key);
+    },
+
     // === BULK OPERATIONS ===
     /* eslint-disable @typescript-eslint/no-explicit-any */
     async importFromApi(data: {
@@ -598,6 +628,10 @@ export const localDb = {
                     // Garder les valeurs locales si elles sont supérieures (évite de perdre le travail)
                     current_row: existing ? Math.max(existing.current_row || 0, p.current_row || 0) : (p.current_row || 0),
                     total_duration: existing ? Math.max(existing.total_duration || 0, p.total_duration || 0) : (p.total_duration || 0),
+                    // Garder un aperçu local si disponible tant que le serveur n'en fournit pas
+                    cover_base64: existing?.cover_base64,
+                    cover_file_path: p.cover_file_path ?? existing?.cover_file_path,
+                    cover_sync_status: 'synced' as const,
                     _syncStatus: 'synced' as const,
                     _localUpdatedAt: Date.now(),
                     _isLocal: false,

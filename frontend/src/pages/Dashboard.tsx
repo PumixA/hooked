@@ -1,12 +1,12 @@
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Settings, Plus, Loader2, Clock, Package, Trash2, Edit2, CheckCircle } from 'lucide-react';
 import Card from '../components/ui/Card';
-import Navbar from '../components/BottomNavBar';
 import { useState, useRef, useEffect } from 'react';
 import Modal from '../components/ui/Modal';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
-import { useProjects, useUpdateProject, useDeleteProject, useWeeklyTime, useSync } from '../hooks/useOfflineData';
+import { useProjects, useUpdateProject, useDeleteProject, useWeeklyTime } from '../hooks/useOfflineData';
+import { getProjectVisual } from '../services/media';
 
 interface Project {
     id: string;
@@ -15,12 +15,13 @@ interface Project {
     goal_rows?: number;
     updated_at: string;
     status: string;
+    cover_file_path?: string;
+    cover_base64?: string;
 }
 
 export default function Dashboard() {
     const navigate = useNavigate();
     const location = useLocation();
-    const [isRefreshing, setIsRefreshing] = useState(false);
 
     // --- ETATS POUR LE MENU CONTEXTUEL ---
     const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -38,7 +39,6 @@ export default function Dashboard() {
     const { data: weeklyTimeData, isLoading: isWeeklyLoading, refetch: refetchWeekly } = useWeeklyTime();
     const updateProjectMutation = useUpdateProject();
     const deleteProjectMutation = useDeleteProject();
-    const syncMutation = useSync();
 
     // Recharger les projets à chaque arrivée sur le dashboard
     useEffect(() => {
@@ -86,43 +86,6 @@ export default function Dashboard() {
     };
 
     const projectList = Array.isArray(projects) ? projects : [];
-
-    const handleRefresh = async () => {
-        setIsRefreshing(true);
-        if (navigator.onLine) {
-            await syncMutation.mutateAsync();
-        }
-        await Promise.all([refetch(), refetchWeekly()]);
-        setIsRefreshing(false);
-    };
-
-    // Pull-to-refresh logic
-    const [touchStart, setTouchStart] = useState(0);
-    const [pullDistance, setPullDistance] = useState(0);
-
-    const handleTouchStart = (e: React.TouchEvent) => {
-        if (window.scrollY === 0) {
-            setTouchStart(e.touches[0].clientY);
-        }
-    };
-
-    const handleTouchMove = (e: React.TouchEvent) => {
-        if (touchStart > 0) {
-            const currentY = e.touches[0].clientY;
-            const distance = currentY - touchStart;
-            if (distance > 0) {
-                setPullDistance(distance);
-            }
-        }
-    };
-
-    const handleTouchEnd = async () => {
-        if (pullDistance > 100) {
-            await handleRefresh();
-        }
-        setTouchStart(0);
-        setPullDistance(0);
-    };
 
     // --- GESTION DU LONG PRESS ---
     const handlePointerDown = (project: Project, e: React.PointerEvent) => {
@@ -196,7 +159,7 @@ export default function Dashboard() {
     }
 
     return (
-        <div className="flex flex-col h-screen bg-background text-white animate-fade-in">
+        <div className="flex flex-col h-[100dvh] bg-background text-white animate-fade-in overflow-hidden">
 
             {/* --- HEADER FIXE --- */}
             <div className="p-4 z-10 bg-background">
@@ -235,18 +198,8 @@ export default function Dashboard() {
 
             {/* --- CONTENU SCROLLABLE --- */}
             <div
-                className="flex-1 overflow-y-auto px-4 pb-24 space-y-6 relative"
-                onTouchStart={handleTouchStart}
-                onTouchMove={handleTouchMove}
-                onTouchEnd={handleTouchEnd}
+                className="flex-1 overflow-y-auto overscroll-none px-4 pb-24 space-y-6 relative"
             >
-                {/* Indicateur de rafraîchissement */}
-                {(pullDistance > 50 || isRefreshing) && (
-                    <div className="flex justify-center py-4 absolute top-0 left-0 right-0 -mt-12 transition-all" style={{ transform: `translateY(${Math.min(pullDistance / 2, 60)}px)` }}>
-                        <Loader2 className="animate-spin text-primary" size={24} />
-                    </div>
-                )}
-
                 <h2 className="text-lg font-bold mb-4">En cours</h2>
 
                 {isProjectsLoading ? (
@@ -274,28 +227,28 @@ export default function Dashboard() {
                                 onClick={(e) => handleCardClick(lastProject.id, e)}
                                 className={`relative overflow-hidden bg-secondary p-5 rounded-3xl border shadow-lg shadow-primary/5 cursor-pointer active:scale-[0.98] transition-all select-none mb-4 ${lastProject.status === 'completed' ? 'border-green-500/30 bg-green-500/5' : 'border-primary/20'}`}
                             >
-                                <img src="/logo.svg" alt="" className="absolute top-3 right-3 w-16 h-16 opacity-50 pointer-events-none" />
+                                <img
+                                    src={getProjectVisual(lastProject.cover_base64, lastProject.cover_file_path)}
+                                    alt=""
+                                    className={`pointer-events-none ${lastProject.cover_base64 || lastProject.cover_file_path ? 'absolute inset-0 w-full h-full object-cover opacity-20' : 'absolute top-3 right-3 w-16 h-16 opacity-50'}`}
+                                    onError={(event) => {
+                                        const target = event.currentTarget;
+                                        if (target.src.endsWith('/logo.svg')) return;
+                                        target.src = '/logo.svg';
+                                    }}
+                                />
+                                {(lastProject.cover_base64 || lastProject.cover_file_path) && (
+                                    <div className="absolute inset-0 bg-gradient-to-t from-background/90 via-background/40 to-background/20 pointer-events-none" />
+                                )}
 
-                                <div className="flex items-center gap-2 mb-3">
+                                <div className="relative z-10 flex items-center gap-2 mb-3">
                                     <span className={`inline-block text-[10px] px-3 py-1 rounded-full font-bold uppercase tracking-wider ${lastProject.status === 'completed' ? 'bg-green-500/20 text-green-400' : 'bg-primary/20 text-primary'}`}>
                                         {lastProject.status === 'completed' ? 'Terminé' : 'Dernier projet'}
                                     </span>
                                     {lastProject.status === 'completed' && <CheckCircle size={14} className="text-green-400" />}
                                 </div>
 
-                                <h3 className="text-2xl font-bold mb-2 truncate">{lastProject.title}</h3>
-                                <div className="mt-6">
-                                    <div className="flex justify-between text-xs text-zinc-400 mb-2 font-medium">
-                                        <span>Progression</span>
-                                        <span>{lastProject.current_row} <span className="text-zinc-600">/ {lastProject.goal_rows || '∞'}</span></span>
-                                    </div>
-                                    <div className="w-full bg-zinc-800 h-2.5 rounded-full overflow-hidden">
-                                        <div
-                                            className={`h-full transition-all duration-700 ease-out ${lastProject.status === 'completed' ? 'bg-green-500' : 'bg-primary'}`}
-                                            style={{ width: `${lastProject.goal_rows ? Math.min(100, (lastProject.current_row / lastProject.goal_rows) * 100) : 5}%` }}
-                                        />
-                                    </div>
-                                </div>
+                                <h3 className="relative z-10 text-2xl font-bold mb-2 truncate">{lastProject.title}</h3>
                             </div>
                         )}
 
@@ -317,7 +270,7 @@ export default function Dashboard() {
                                         <div>
                                             <h4 className="font-bold text-sm truncate">{proj.title}</h4>
                                             <p className={`text-xs mt-1 ${proj.status === 'completed' ? 'text-green-400' : 'text-primary'}`}>
-                                                {proj.status === 'completed' ? 'Terminé' : `Rang ${proj.current_row}`}
+                                                {proj.status === 'completed' ? 'Terminé' : 'En cours'}
                                             </p>
                                         </div>
                                     </div>
@@ -336,8 +289,6 @@ export default function Dashboard() {
             >
                 <Plus size={32} strokeWidth={2.5} />
             </button>
-
-            <Navbar />
 
             {/* --- MODALES --- */}
 
