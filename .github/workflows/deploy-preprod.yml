@@ -1,0 +1,53 @@
+name: Deploy to Preprod
+
+on:
+  push:
+    branches: [dev]
+
+jobs:
+  lint-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            backend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Lint frontend
+        run: npm run lint
+        working-directory: frontend
+
+      - name: Build frontend
+        run: npm run build
+        working-directory: frontend
+
+      - name: Install backend dependencies
+        run: npm ci
+        working-directory: backend
+
+      - name: Build backend
+        run: npm run build
+        working-directory: backend
+
+  deploy:
+    runs-on: self-hosted
+    needs: lint-and-build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy preprod
+        run: |
+          cd /opt/hooked
+          git fetch origin dev
+          git checkout dev
+          git pull origin dev
+          docker compose -f docker-compose.preprod.yml up -d --build

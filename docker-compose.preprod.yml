@@ -1,0 +1,53 @@
+services:
+  # --- 1. Base de données preprod ---
+  db-preprod:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${PREPROD_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${PREPROD_POSTGRES_PASSWORD}
+      POSTGRES_DB: ${PREPROD_POSTGRES_DB}
+    volumes:
+      - db_data_preprod:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - hooked-network
+
+  # --- 2. Backend preprod ---
+  backend-preprod:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: always
+    environment:
+      DATABASE_URL: postgres://${PREPROD_POSTGRES_USER}:${PREPROD_POSTGRES_PASSWORD}@db-preprod:5432/${PREPROD_POSTGRES_DB}
+      JWT_SECRET: ${PREPROD_JWT_SECRET}
+      PORT: 3000
+      HOST: "0.0.0.0"
+    volumes:
+      - ./backend/uploads-preprod:/app/uploads
+    depends_on:
+      - db-preprod
+    networks:
+      - hooked-network
+
+  # --- 3. Frontend preprod ---
+  frontend-preprod:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: always
+    environment:
+      BACKEND_HOST: backend-preprod
+    depends_on:
+      - backend-preprod
+    networks:
+      - hooked-network
+
+volumes:
+  db_data_preprod:
+
+networks:
+  hooked-network:
+    external: true
+    name: hooked_hooked-network
