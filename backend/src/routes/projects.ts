@@ -2,6 +2,12 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../index';
+import util from 'util';
+import { pipeline } from 'stream';
+import fs from 'fs';
+import path from 'path';
+
+const pump = util.promisify(pipeline);
 
 // Validation Zod pour la création
 const createProjectSchema = z.object({
@@ -170,6 +176,17 @@ export async function projectsRoutes(server: FastifyInstance) {
         if (!existing) return reply.code(404).send({ error: "Projet introuvable" });
 
         try {
+            if (existing.cover_file_path) {
+                const coverPath = path.join(__dirname, '../../', existing.cover_file_path);
+                if (fs.existsSync(coverPath)) {
+                    try {
+                        fs.unlinkSync(coverPath);
+                    } catch (err) {
+                        server.log.warn({ err }, 'Impossible de supprimer la couverture projet');
+                    }
+                }
+            }
+
             await prisma.sessions.deleteMany({ where: { project_id: id } });
             await prisma.notes.deleteMany({ where: { project_id: id } });
             await prisma.photos.deleteMany({ where: { project_id: id } });
@@ -180,6 +197,101 @@ export async function projectsRoutes(server: FastifyInstance) {
         } catch (err) {
             server.log.error(err);
             return reply.code(500).send({ error: "Erreur lors de la suppression" });
+        }
+    });
+
+    // 6. UPLOAD COUVERTURE PROJET
+    server.post('/:id/cover', async (request, reply) => {
+        const { id } = request.params as { id: string };
+        const userId = request.user.id;
+        const data = await request.file();
+
+        if (!data) {
+            return reply.code(400).send({ error: 'Aucun fichier envoyé' });
+        }
+
+        const project = await prisma.projects.findFirst({
+            where: { id, user_id: userId },
+            select: { id: true, cover_file_path: true }
+        });
+
+        if (!project) {
+            return reply.code(404).send({ error: 'Projet introuvable' });
+        }
+
+        const extFromName = path.extname(data.filename || '');
+        const ext = extFromName || '.jpg';
+        const newFilename = `cover_${id}_${Date.now()}${ext}`;
+        const uploadPath = path.join(__dirname, '../../uploads', newFilename);
+        const fileUrl = `/uploads/${newFilename}`;
+
+        try {
+            await pump(data.file, fs.createWriteStream(uploadPath));
+
+            if (project.cover_file_path) {
+                const previousCoverPath = path.join(__dirname, '../../', project.cover_file_path);
+                if (fs.existsSync(previousCoverPath)) {
+                    try {
+                        fs.unlinkSync(previousCoverPath);
+                    } catch (err) {
+                        server.log.warn({ err }, 'Impossible de supprimer l’ancienne couverture');
+                    }
+                }
+            }
+
+            const updated = await prisma.projects.update({
+                where: { id },
+                data: {
+                    cover_file_path: fileUrl,
+                    updated_at: new Date()
+                }
+            });
+
+            return reply.code(200).send(updated);
+        } catch (err) {
+            server.log.error(err);
+            return reply.code(500).send({ error: 'Erreur lors de l’upload de la couverture' });
+        }
+    });
+
+    // 7. SUPPRIMER COUVERTURE PROJET
+    server.delete('/:id/cover', async (request, reply) => {
+        const { id } = request.params as { id: string };
+        const userId = request.user.id;
+
+        const project = await prisma.projects.findFirst({
+            where: { id, user_id: userId },
+            select: { id: true, cover_file_path: true }
+        });
+
+        if (!project) {
+            return reply.code(404).send({ error: 'Projet introuvable' });
+        }
+
+        try {
+            if (project.cover_file_path) {
+                const coverPath = path.join(__dirname, '../../', project.cover_file_path);
+                if (fs.existsSync(coverPath)) {
+                    try {
+                        fs.unlinkSync(coverPath);
+                    } catch (err) {
+                        server.log.warn({ err }, 'Impossible de supprimer le fichier de couverture');
+                    }
+                }
+            }
+
+            const updated = await prisma.projects.update({
+                where: { id },
+                data: {
+                    cover_file_path: null,
+                    updated_at: new Date()
+                }
+            });
+
+            return reply.code(200).send(updated);
+        } catch (err) {
+            server.log.error(err);
+            return reply.code(500).send({ error: 'Erreur lors de la suppression de la couverture' });
         }
     });
 }

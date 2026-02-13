@@ -6,9 +6,13 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
       registerType: 'autoUpdate',
       devOptions: {
-        enabled: true
+        enabled: true,
+        type: 'module',
       },
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'logo-mini.svg'],
       manifest: {
@@ -42,15 +46,8 @@ export default defineConfig({
           }
         ]
       },
-      workbox: {
-        skipWaiting: true,
-        clientsClaim: true,
-        globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
-        cleanupOutdatedCaches: true,
-        // 🔥 OFFLINE-FIRST via IndexedDB: Pas de cache SW pour l'API
-        // Les données sont gérées par localDb.ts et syncService.ts
-        runtimeCaching: [],
-        navigateFallback: null
+      injectManifest: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}'],
       }
     })
   ],

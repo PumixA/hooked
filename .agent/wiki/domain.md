@@ -1,6 +1,6 @@
 # Domain Glossary (Ubiquitous Language)
 
-> Version: 2.1.0
+> Version: 2.2.0
 >
 > Every term in this glossary is the **canonical name** used in code, documentation, and communication.
 > Using a different name for the same concept is a **breaking change**.
@@ -18,9 +18,16 @@
 ### Project
 
 - **Definition**: A knitting or crochet work being tracked by the user, with a row counter, timer, notes, and photos
-- **Type**: `interface { id: string; title: string; current_row: number; goal_rows: number | null; status: ProjectStatus; category_id: string; increment_step: number; total_duration: number; }`
+- **Type**: `interface { id: string; title: string; current_row: number; goal_rows: number | null; status: ProjectStatus; category_id: string; increment_step: number; total_duration: number; cover_file_path?: string; cover_base64?: string; }`
 - **Context**: Core entity. Displayed on Dashboard, managed in ProjectDetail
 - **Synonyms to avoid**: task, item, work
+
+### ProjectCover
+
+- **Definition**: Optional visual cover image for a Project, configured from Project settings
+- **Type**: `interface { cover_file_path?: string; cover_base64?: string; cover_sync_status?: 'synced' | 'pending'; }`
+- **Context**: Dashboard card uses app logo by default; if a ProjectCover is defined, it is displayed instead and synchronized when cloud sync is active
+- **Synonyms to avoid**: heroImage, banner, thumbnail
 
 ### Category
 

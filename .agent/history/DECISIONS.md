@@ -20,6 +20,19 @@
 
 <!-- Entries below this line. Most recent on top. -->
 
+## [2026-02-13] Hash routing, timer runtime metadata, and dedicated project cover flow
+
+- **Agent**: codex
+- **Context**: Android deep-route reload produced blank screens, stopwatch drifted after sleep/background, and dashboard identity needed a configurable per-project cover while keeping offline-first behavior.
+- **Options considered**: (A) Keep BrowserRouter + server-only fallback, (B) Switch to HashRouter for PWA route resilience; (A) Persist timer only in component state, (B) Persist timer runtime state in IndexedDB metadata; (A) Reuse generic project photos as cover, (B) Dedicated project cover upload/remove flow.
+- **Decision**: Option B for all three axes. HashRouter was chosen for immediate Android reliability. Timer runtime metadata (`timer:<projectId>`) was added to maintain system-clock accuracy across sleep/reload. A dedicated cover flow (`POST/DELETE /projects/:id/cover`) was added with app logo as default fallback, and offline cover preview (`cover_base64`) is synchronized when cloud sync is enabled.
+- **Consequences**:
+  - Frontend routing now uses hash URLs (`/#/...`).
+  - Timer logic moved to a dedicated hook with runtime checkpoint persistence in IndexedDB metadata.
+  - Project model extended with cover fields in local and backend layers.
+  - Sync pipeline now handles pending project covers explicitly.
+  - Service worker notification foundation added for lockscreen increment action messaging.
+
 ## [2026-02-13] Self-hosted GitHub Actions runner for deploy
 
 - **Agent**: claude-code

@@ -1,6 +1,6 @@
 # Functional Requirements
 
-> Version: 2.1.0
+> Version: 2.2.0
 
 ---
 
@@ -28,10 +28,12 @@
 **Acceptance criteria**:
 - [ ] Display weekly crafting time stats
 - [ ] Show last opened project as featured (large card)
-- [ ] Grid of other projects with progress bars
+- [ ] Grid of other projects cards with compact row information
 - [ ] FAB button (+) for quick project creation
 - [ ] Orange badge "Hors ligne" when offline
 - [ ] Yellow badge showing pending sync count
+- [ ] Featured card uses app logo by default
+- [ ] Featured card switches to project cover photo only when set from Project Settings
 
 ### F2: Project Management (Counter)
 
@@ -46,6 +48,7 @@
 - [ ] Violet (+) button to increment by `increment_step`
 - [ ] Discreet (-) button to decrement
 - [ ] Integrated stopwatch with start/pause/stop
+- [ ] Stopwatch uses real clock time and stays accurate after device sleep/background
 - [ ] Session recording (start_time, end_time, duration)
 - [ ] Project status: in_progress, completed, archived
 - [ ] Notes (free text per project)
@@ -90,6 +93,7 @@
 - [ ] Default categories injected at first launch
 - [ ] Photos stored as base64 in IndexedDB when offline
 - [ ] Local IDs (`local-xxx`) for offline-created entities
+- [ ] Reloading deep routes on Android PWA must not produce a blank screen
 
 ### F6: Cloud Sync (Optional)
 
@@ -105,6 +109,7 @@
 - [ ] Pull new data from server
 - [ ] Last Write Wins conflict resolution
 - [ ] Visual indicators for pending sync items
+- [ ] Project cover photo syncs when cloud sync is enabled
 
 ### F7: Settings
 

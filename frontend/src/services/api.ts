@@ -88,8 +88,9 @@ api.interceptors.response.use(
             localStorage.removeItem('token');
             localStorage.removeItem('user');
 
-            if (window.location.pathname !== '/login') {
-                window.location.href = '/login';
+            const isAlreadyOnLogin = window.location.hash.startsWith('#/login');
+            if (!isAlreadyOnLogin) {
+                window.location.hash = '#/login';
             }
         }
 

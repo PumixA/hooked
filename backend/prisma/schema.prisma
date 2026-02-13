@@ -63,6 +63,7 @@ model projects {
   goal_rows      Int?
   increment_step Int?      @default(1)
   total_duration Int?      @default(0)
+  cover_file_path String?  @db.VarChar(255)
   start_date     DateTime? @default(now()) @db.Timestamptz(6)
   end_date       DateTime? @db.Timestamptz(6)
   created_at     DateTime? @default(now()) @db.Timestamptz(6)
