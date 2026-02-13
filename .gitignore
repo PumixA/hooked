@@ -16,6 +16,9 @@ yarn-error.log*
 dist/
 build/
 
+# PWA dev service worker (generated)
+frontend/dev-dist/
+
 # Docker volumes & data (On ne versionne pas la BDD !)
 postgres_data/
 docker-init/
