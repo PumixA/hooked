@@ -1,15 +1,23 @@
 # CI/CD Pipeline
 
-> Version: 3.0.0
+> Version: 4.0.0
 
 ---
 
 ## Architecture
 
 ```
-Push to main → GitHub Actions (cloud) → Lint + Build → GitHub Actions (self-hosted) → git pull + docker compose up --build
-Push tag v* → GitHub Actions → Generate release notes → Create GitHub Release
+Push to main → GitHub Actions (cloud) → Lint + Build → GitHub Actions (self-hosted) → git pull + docker compose prod up --build
+Push to dev  → GitHub Actions (cloud) → Lint + Build → GitHub Actions (self-hosted) → git pull + docker compose preprod up --build
+Push tag v*  → GitHub Actions → Generate release notes → Create GitHub Release
 ```
+
+## Environments
+
+| Environment | Branch | URL | Docker Compose |
+|-------------|--------|-----|----------------|
+| Production  | `main` | `https://hooked.melvin-delorme.fr:33443` | `docker-compose.prod.yml` |
+| Preprod     | `dev`  | `https://hooked-preprod.melvin-delorme.fr:33443` | `docker-compose.preprod.yml` |
 
 ## Branch Protection
 
@@ -40,7 +48,17 @@ Push tag v* → GitHub Actions → Generate release notes → Create GitHub Rele
 - Labels: `self-hosted`, `linux`, `x64`
 - No inbound ports required (runner polls GitHub for jobs)
 
-### 2. Release (`release.yml`)
+### 2. Deploy Preprod (`deploy-preprod.yml`)
+
+**Trigger**: push on `dev`
+
+**Jobs**:
+1. **lint-and-build**: Same as production (validates code compiles)
+2. **deploy**: Runs on self-hosted runner
+   - `runs-on: self-hosted`
+   - `cd /opt/hooked && git checkout dev && git pull origin dev && docker compose -f docker-compose.preprod.yml up -d --build`
+
+### 3. Release (`release.yml`)
 
 **Trigger**: push tag `v*`
 
@@ -66,23 +84,35 @@ Services:
 
 ```mermaid
 graph LR
-    NPM[Nginx Proxy Manager] --> FE[Frontend nginx]
-    FE -->|/api/| BE[Backend Fastify]
-    BE --> DB[PostgreSQL]
+    NPM[Nginx Proxy Manager] -->|hooked.melvin-delorme.fr| FE[frontend]
+    NPM -->|hooked-preprod.melvin-delorme.fr| FEP[frontend-preprod]
+    FE -->|/api/| BE[backend]
+    FEP -->|/api/| BEP[backend-preprod]
+    BE --> DB[db]
+    BEP --> DBP[db-preprod]
 ```
 
-Services:
+Services (prod):
 - **frontend**: Nginx serving SPA build + reverse proxy `/api/` to backend
 - **backend**: Fastify compiled (CMD: prisma migrate deploy + node dist/index.js)
 - **db**: PostgreSQL 15-alpine with volume persistence
-- **npm**: Nginx Proxy Manager for HTTPS/SSL termination
+- **npm**: Nginx Proxy Manager for HTTPS/SSL termination (shared by prod + preprod)
+
+### Preprod (`docker-compose.preprod.yml`)
+
+Services (preprod — isolated from prod):
+- **frontend-preprod**: Same image as prod, `BACKEND_HOST=backend-preprod` for nginx routing
+- **backend-preprod**: Same image, separate DB connection
+- **db-preprod**: Separate PostgreSQL instance with own volume (`db_data_preprod`)
+- Shares the `hooked_hooked-network` Docker network with prod (for NPM access)
 
 ### Frontend Nginx Config
 
-The frontend container uses a custom `nginx.conf` that:
+The frontend container uses `nginx.conf.template` (processed by `envsubst` at container start):
 - Serves the SPA with `try_files $uri $uri/ /index.html` for client-side routing
-- Proxies `/api/` requests to `http://backend:3000/`
-- Proxies `/uploads/` requests to `http://backend:3000/uploads/`
+- Proxies `/api/` requests to `http://${BACKEND_HOST}:3000/`
+- Proxies `/uploads/` requests to `http://${BACKEND_HOST}:3000/uploads/`
+- `BACKEND_HOST` defaults to `backend` (prod), set to `backend-preprod` in preprod compose
 
 ### API URL Strategy
 
@@ -139,8 +169,11 @@ npx prisma generate       # Regenerate client
 
 ### Docker
 ```bash
-docker compose up -d                    # Start dev DB + Adminer
-docker compose -f docker-compose.prod.yml up -d  # Start production
+docker compose up -d                                       # Start dev DB + Adminer
+docker compose -f docker-compose.prod.yml up -d            # Start production
+docker compose -f docker-compose.preprod.yml up -d         # Start preprod
+docker compose down                                        # Stop services
+docker compose logs -f                                     # View logs
 ```
 
 ## Versioning
@@ -167,3 +200,18 @@ docker compose -f docker-compose.prod.yml up -d  # Start production
    - `./config.sh --url https://github.com/PumixA/hooked --token <TOKEN>`
    - `sudo ./svc.sh install pumix && sudo ./svc.sh start`
 6. Verify runner appears as "Online" in GitHub > Settings > Actions > Runners
+
+## Network & DNS
+
+- **Domain**: `melvin-delorme.fr` (OVH)
+- **Public IP**: `88.184.218.67` (Freebox)
+- **Freebox port forwarding**: WAN `33443` → LAN `9443` (HTTPS to NPM)
+- Free ISP blocks standard ports (80, 443) on residential lines → must use ports > 32768
+- SSL certificates via **Let's Encrypt DNS challenge** (OVH API) since HTTP-01 challenge impossible without port 80
+
+### Nginx Proxy Manager Routing
+
+| Domain | Forward to | SSL |
+|--------|-----------|-----|
+| `hooked.melvin-delorme.fr` | `frontend:80` | Let's Encrypt |
+| `hooked-preprod.melvin-delorme.fr` | `hooked-frontend-preprod-1:80` | Let's Encrypt (DNS challenge OVH) |

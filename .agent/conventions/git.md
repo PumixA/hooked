@@ -73,6 +73,8 @@ Co-Authored-By: <Agent Name> <noreply@provider.com>
 | `docker`    | Docker, docker-compose configuration           |
 | `deps`      | Dependency updates                             |
 | `ci`        | CI/CD pipeline                                 |
+| `infra`     | Docker, server, DNS, NPM, network              |
+| `git`       | Branches, remotes, tags, repo management       |
 | `docs`      | Documentation (.agent/, Documents/)            |
 
 ### Rules
