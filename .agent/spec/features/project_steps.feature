@@ -9,11 +9,11 @@ Feature: Project step-by-step flow
     When I open project detail
     Then I do not see any step card under the counter
 
-  Scenario: Define steps in project settings
+  Scenario: Define steps in project detail
     Given a project exists
-    When I open project settings
+    When I open project detail
     And I add a step "Côtes" with target rows 20 and memo "Augmentation tous les 4 rangs"
-    And I save settings
+    And I save steps
     Then the project has steps configured
     And I see the step card under the counter
 

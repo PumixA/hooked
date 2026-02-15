@@ -47,6 +47,7 @@
 - [ ] Giant counter displaying current row
 - [ ] Violet (+) button to increment by `increment_step`
 - [ ] Discreet (-) button to decrement
+- [ ] Counter can be reset to 0 from the counter screen
 - [ ] Optional step-by-step mode: define project steps with target rows and per-step instruction memo
 - [ ] When steps are defined, the UI shows the current step, its progress, and the instruction memo under the counter
 - [ ] Each step has its own row counter (`current_rows`) and target
@@ -79,9 +80,13 @@
 
 **Acceptance criteria**:
 - [ ] Filter chips: Tout / Crochets / Laine / Aiguilles
-- [ ] Material cards with name, brand, composition
+- [ ] Material cards with name (and optional size), brand, composition, and optional descriptif (color number, yardage, grammage)
 - [ ] Quick add form per material type
+- [ ] Optional material descriptif fields: color_number, yardage_meters, grammage_grams
+- [ ] Optional free-text material description field
 - [ ] Associate materials with projects (junction table)
+- [ ] Project view displays only associated materials by default
+- [ ] Add/remove project materials from a dedicated "manage materials" menu (not always visible)
 
 ### F5: Offline-First Data
 

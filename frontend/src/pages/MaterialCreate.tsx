@@ -19,7 +19,11 @@ export default function MaterialCreate() {
         name: '',
         size: '',
         brand: '',
-        material_composition: ''
+        material_composition: '',
+        description: '',
+        color_number: '',
+        yardage_meters: '',
+        grammage_grams: '',
     });
 
     // OFFLINE-FIRST: Utilisation du hook local
@@ -38,7 +42,20 @@ export default function MaterialCreate() {
         e.preventDefault();
         if (!formData.name) return;
 
-        createMaterialMutation.mutate(formData, {
+        const yardageMeters = formData.yardage_meters.trim() === '' ? undefined : Number(formData.yardage_meters);
+        const grammageGrams = formData.grammage_grams.trim() === '' ? undefined : Number(formData.grammage_grams);
+
+        createMaterialMutation.mutate({
+            category_type: formData.category_type,
+            name: formData.name,
+            size: formData.size || undefined,
+            brand: formData.brand || undefined,
+            material_composition: formData.material_composition || undefined,
+            description: formData.description || undefined,
+            color_number: formData.color_number || undefined,
+            yardage_meters: Number.isFinite(yardageMeters) ? yardageMeters : undefined,
+            grammage_grams: Number.isFinite(grammageGrams) ? grammageGrams : undefined,
+        }, {
             onSuccess: () => {
                 navigate('/inventory');
             }
@@ -48,7 +65,7 @@ export default function MaterialCreate() {
     const isYarn = formData.category_type === 'yarn';
 
     return (
-        <div className="min-h-screen bg-background p-4 text-white animate-fade-in pb-20">
+        <div className="h-[100dvh] overflow-y-auto bg-background p-4 text-white animate-fade-in pb-28">
 
             {/* Header */}
             <div className="flex items-center gap-4 mb-6">
@@ -121,6 +138,45 @@ export default function MaterialCreate() {
                     value={formData.material_composition}
                     onChange={(e) => setFormData({...formData, material_composition: e.target.value})}
                 />
+
+                <div className="space-y-2">
+                    <label className="text-xs text-zinc-400 ml-1">Description</label>
+                    <textarea
+                        value={formData.description}
+                        onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                        placeholder="ex: numéro d'aiguilles conseillé, échantillon, notes..."
+                        className="w-full min-h-24 bg-secondary text-white p-4 rounded-xl border border-zinc-800 resize-none placeholder-zinc-500 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all"
+                    />
+                </div>
+
+                <div className="pt-2">
+                    <div className="space-y-4">
+                        <Input
+                            label="Numéro de couleur"
+                            placeholder="ex: 07"
+                            value={formData.color_number}
+                            onChange={(e) => setFormData({...formData, color_number: e.target.value})}
+                        />
+                        <Input
+                            label="Métrage (m)"
+                            type="number"
+                            inputMode="numeric"
+                            min={0}
+                            placeholder="ex: 120"
+                            value={formData.yardage_meters}
+                            onChange={(e) => setFormData({...formData, yardage_meters: e.target.value})}
+                        />
+                        <Input
+                            label="Grammage (g)"
+                            type="number"
+                            inputMode="numeric"
+                            min={0}
+                            placeholder="ex: 50"
+                            value={formData.grammage_grams}
+                            onChange={(e) => setFormData({...formData, grammage_grams: e.target.value})}
+                        />
+                    </div>
+                </div>
 
                 {/* Bouton Action */}
                 <div className="pt-4">

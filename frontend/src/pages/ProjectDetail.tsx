@@ -119,6 +119,10 @@ export default function ProjectDetail() {
     const [selectedPhotoIds, setSelectedPhotoIds] = useState<Set<string>>(new Set());
     const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
     const [showMaterials, setShowMaterials] = useState(false);
+    const [materialsMode, setMaterialsMode] = useState<'view' | 'manage'>('view');
+    const [tempMaterialIds, setTempMaterialIds] = useState<string[]>([]);
+    const [materialsFilter, setMaterialsFilter] = useState<'all' | 'hook' | 'yarn' | 'needle'>('all');
+    const [materialsSearch, setMaterialsSearch] = useState('');
     const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
     const photoLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const notificationPermissionRequestedRef = useRef(false);
@@ -164,6 +168,7 @@ export default function ProjectDetail() {
             setTempGoal(project.goal_rows ? project.goal_rows.toString() : '');
             setTempTitle(project.title);
             setSelectedMaterialIds(project.material_ids || []);
+            setTempMaterialIds(project.material_ids || []);
             setTempProjectSteps(sanitizeProjectSteps(project.project_steps));
             setCoverPreview(project.cover_base64 || resolveServerFilePath(project.cover_file_path) || '/logo-mini.svg');
         }
@@ -393,6 +398,43 @@ export default function ProjectDetail() {
         updateProjectMutation.mutate(updates as { id: string } & Record<string, unknown>);
     }, [id, incrementStep, project, queryClient, updateProjectMutation]);
 
+    const resetCounterToZero = useCallback(() => {
+        if (!project || !id) return;
+
+        const normalizedSteps = sanitizeProjectSteps(project.project_steps);
+        const updates: Record<string, unknown> = { id };
+
+        if (normalizedSteps.length === 0) {
+            updates.current_row = 0;
+        } else {
+            const activeIndex = normalizeActiveStepIndex(project.active_step_index, normalizedSteps);
+            const updatedSteps = normalizedSteps.map((stepItem, index) => {
+                if (index !== activeIndex) return stepItem;
+                return {
+                    ...stepItem,
+                    current_rows: 0,
+                };
+            });
+            updates.project_steps = updatedSteps;
+            updates.active_step_index = activeIndex;
+            updates.current_row = getTotalRowsFromSteps(updatedSteps);
+        }
+
+        // If the project was completed, resetting implies resuming work.
+        if (project.status === 'completed') {
+            updates.status = 'in_progress';
+            updates.end_date = undefined;
+        }
+
+        queryClient.setQueryData(['projects', id], (old: Record<string, unknown>) => ({
+            ...old,
+            ...updates
+        }));
+
+        updateProjectMutation.mutate(updates as { id: string } & Record<string, unknown>);
+        setToastMessage('Compteur remis à zéro');
+    }, [id, project, queryClient, updateProjectMutation]);
+
     const handleToggleTimerFromUI = useCallback(async () => {
         if (!id || !project || project.status === 'completed') return;
 
@@ -547,8 +589,8 @@ export default function ProjectDetail() {
     };
 
     // Gestion des matériaux
-    const toggleMaterial = (materialId: string) => {
-        setSelectedMaterialIds(prev =>
+    const toggleTempMaterial = (materialId: string) => {
+        setTempMaterialIds(prev =>
             prev.includes(materialId)
                 ? prev.filter(mid => mid !== materialId)
                 : [...prev, materialId]
@@ -559,9 +601,19 @@ export default function ProjectDetail() {
         if (!id) return;
         updateProjectMutation.mutate({
             id,
-            material_ids: selectedMaterialIds
+            material_ids: tempMaterialIds
         });
+        setSelectedMaterialIds(tempMaterialIds);
+        setMaterialsMode('view');
         setShowMaterials(false);
+    };
+
+    const openMaterials = () => {
+        setTempMaterialIds(selectedMaterialIds);
+        setMaterialsMode('view');
+        setMaterialsFilter('all');
+        setMaterialsSearch('');
+        setShowMaterials(true);
     };
 
     const getIcon = (type: string) => {
@@ -575,6 +627,19 @@ export default function ProjectDetail() {
 
     // Matériaux liés au projet
     const projectMaterials = allMaterials.filter(m => selectedMaterialIds.includes(m.id));
+    const filteredAllMaterials = allMaterials
+        .filter(m => (materialsFilter === 'all' ? true : m.category_type === materialsFilter))
+        .filter(m => {
+            const q = materialsSearch.trim().toLowerCase();
+            if (!q) return true;
+            return [
+                m.name,
+                m.brand,
+                m.material_composition,
+                m.color_number,
+                m.size,
+            ].filter(Boolean).join(' ').toLowerCase().includes(q);
+        });
 
     const handleSaveNote = () => {
         if (!id) return;
@@ -763,12 +828,12 @@ export default function ProjectDetail() {
                         {stepRowDisplay}
                     </div>
 
-                    <div className="flex flex-col items-center gap-2 mt-1 px-4">
-                        {!isCompleted && incrementStep > 1 && (
-                            <div className="bg-primary/20 text-primary text-[10px] px-2 py-0.5 rounded-full font-bold">
-                                Pas : +/- {incrementStep}
-                            </div>
-                        )}
+	                <div className="flex flex-col items-center gap-2 mt-1 px-4">
+	                    {!isCompleted && incrementStep > 1 && (
+	                        <div className="bg-primary/20 text-primary text-[10px] px-2 py-0.5 rounded-full font-bold">
+	                            Pas : +/- {incrementStep}
+	                        </div>
+	                    )}
 
                         {hasProjectSteps && activeProjectStep && (
                             <div className="bg-zinc-800/70 border border-zinc-700 rounded-xl px-3 py-2 text-center max-w-xs">
@@ -783,16 +848,25 @@ export default function ProjectDetail() {
                             </div>
                         )}
 
-                        {project.goal_rows ? (
-                            <div onClick={() => setShowSettings(true)} className="text-zinc-500 flex items-center gap-2 cursor-pointer hover:text-zinc-300 transition px-2 py-1 rounded-lg hover:bg-zinc-800/50 text-xs">
-                                <span>sur {project.goal_rows} rangs</span>
-                                <span className="text-[10px]">✎</span>
-                            </div>
-                        ) : (
-                            <div className="h-5"></div>
-                        )}
-                    </div>
-                </div>
+	                    {project.goal_rows ? (
+	                        <div onClick={() => setShowSettings(true)} className="text-zinc-500 flex items-center gap-2 cursor-pointer hover:text-zinc-300 transition px-2 py-1 rounded-lg hover:bg-zinc-800/50 text-xs">
+	                            <span>sur {project.goal_rows} rangs</span>
+	                            <span className="text-[10px]">✎</span>
+	                        </div>
+	                    ) : (
+	                        <div className="h-5"></div>
+	                    )}
+
+	                    <button
+	                        type="button"
+	                        onClick={resetCounterToZero}
+	                        className="text-zinc-500 text-xs flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-zinc-800/50 hover:text-zinc-300 transition"
+	                    >
+	                        <RotateCcw size={14} />
+	                        <span>{isCompleted ? 'Reprendre et reset' : 'Reset à 0'}</span>
+	                    </button>
+	                </div>
+	            </div>
 
                 <div className={`shrink-0 flex items-center justify-center gap-8 py-3 bg-background transition-opacity ${isCompleted ? 'opacity-0 pointer-events-none' : ''}`}>
                     <button onClick={() => updateCounter(-1)} className="w-14 h-14 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 shadow-lg active:scale-90 transition-transform">
@@ -813,7 +887,7 @@ export default function ProjectDetail() {
                             <Camera size={16} />
                             <span className="text-[9px]">Photos</span>
                         </button>
-                        <button onClick={() => setShowMaterials(true)} className="flex flex-col items-center justify-center gap-0.5 bg-zinc-800/50 border border-zinc-700/50 rounded-xl text-zinc-400 hover:bg-zinc-800 hover:text-white transition h-12 relative">
+                        <button onClick={openMaterials} className="flex flex-col items-center justify-center gap-0.5 bg-zinc-800/50 border border-zinc-700/50 rounded-xl text-zinc-400 hover:bg-zinc-800 hover:text-white transition h-12 relative">
                             <Package size={16} />
                             <span className="text-[9px]">Matériaux</span>
                             {projectMaterials.length > 0 && (
@@ -1175,37 +1249,187 @@ export default function ProjectDetail() {
                 </div>
             </Modal>
 
-            <Modal isOpen={showMaterials} onClose={() => setShowMaterials(false)} title="Matériaux">
+            <Modal
+                isOpen={showMaterials}
+                onClose={() => {
+                    setShowMaterials(false);
+                    setMaterialsMode('view');
+                    setTempMaterialIds(selectedMaterialIds);
+                    setMaterialsFilter('all');
+                    setMaterialsSearch('');
+                }}
+                title="Matériaux"
+            >
                 <div className="space-y-4">
-                    {allMaterials.length === 0 ? (
-                        <div className="text-center py-8 text-zinc-500">
-                            <Package size={48} className="mx-auto mb-3 opacity-50" />
-                            <p>Aucun matériel dans l'inventaire</p>
-                            <p className="text-xs mt-1">Ajoutez des matériaux depuis l'inventaire</p>
-                        </div>
+                    {materialsMode === 'view' ? (
+                        <>
+                            {projectMaterials.length === 0 ? (
+                                <div className="text-center py-8 text-zinc-500">
+                                    <Package size={48} className="mx-auto mb-3 opacity-50" />
+                                    <p>Aucun matériel associé à ce projet</p>
+                                    <p className="text-xs mt-1">Ajoutez-en depuis votre inventaire</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    {projectMaterials.map((mat) => (
+                                        <div
+                                            key={mat.id}
+                                            className="p-3 rounded-xl bg-zinc-900/40 border border-zinc-800 flex items-start justify-between gap-3"
+                                        >
+                                            <div className="flex items-start gap-3">
+                                                <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-xl shrink-0">
+                                                    {getIcon(mat.category_type)}
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <p className="text-white font-semibold truncate">{mat.name}</p>
+                                                    <p className="text-xs text-zinc-400 mt-0.5">
+                                                        {[
+                                                            mat.size ? `${mat.size}mm` : undefined,
+                                                            mat.brand,
+                                                            mat.material_composition,
+                                                            mat.color_number ? `couleur ${mat.color_number}` : undefined,
+                                                            typeof mat.yardage_meters === 'number' ? `${mat.yardage_meters}m` : undefined,
+                                                            typeof mat.grammage_grams === 'number' ? `${mat.grammage_grams}g` : undefined,
+                                                        ].filter(Boolean).join(' - ') || '—'}
+                                                    </p>
+                                                    {mat.description && (
+                                                        <p className="text-[11px] text-zinc-500 mt-1 whitespace-pre-wrap">
+                                                            {mat.description}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            <div className="flex gap-3 pt-2">
+                                <Button
+                                    variant="secondary"
+                                    onClick={() => setShowMaterials(false)}
+                                    className="flex-1"
+                                >
+                                    Fermer
+                                </Button>
+                                <Button
+                                    onClick={() => {
+                                        setTempMaterialIds(selectedMaterialIds);
+                                        setMaterialsMode('manage');
+                                    }}
+                                    className="flex-1"
+                                >
+                                    Gérer
+                                </Button>
+                            </div>
+                        </>
                     ) : (
                         <>
-                            <p className="text-xs text-zinc-400">Sélectionnez les matériaux utilisés pour ce projet</p>
-                            <div className="flex flex-wrap gap-2 max-h-[40vh] overflow-y-auto">
-                                {allMaterials.map((mat) => (
-                                    <button
-                                        key={mat.id}
-                                        type="button"
-                                        onClick={() => toggleMaterial(mat.id)}
-                                        className={`px-3 py-2 rounded-xl text-sm font-medium border transition-all flex items-center gap-2 ${
-                                            selectedMaterialIds.includes(mat.id)
-                                                ? "bg-secondary border-primary text-white shadow-[0_0_10px_-3px_rgba(196,181,254,0.5)]"
-                                                : "bg-zinc-800/50 border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:bg-zinc-800"
-                                        }`}
-                                    >
-                                        <span>{getIcon(mat.category_type)}</span>
-                                        <span>{mat.name}</span>
-                                    </button>
-                                ))}
+                            {allMaterials.length === 0 ? (
+                                <div className="text-center py-8 text-zinc-500">
+                                    <Package size={48} className="mx-auto mb-3 opacity-50" />
+                                    <p>Aucun matériel dans l'inventaire</p>
+                                    <p className="text-xs mt-1">Ajoutez des matériaux depuis l'inventaire</p>
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="text"
+                                            value={materialsSearch}
+                                            onChange={(e) => setMaterialsSearch(e.target.value)}
+                                            placeholder="Rechercher..."
+                                            className="flex-1 p-3 rounded-xl bg-zinc-800/60 border border-zinc-700 text-white placeholder-zinc-500 focus:outline-none focus:border-primary"
+                                        />
+                                    </div>
+
+                                    <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+                                        {[
+                                            { id: 'all' as const, label: 'Tout' },
+                                            { id: 'hook' as const, label: 'Crochets' },
+                                            { id: 'yarn' as const, label: 'Laine' },
+                                            { id: 'needle' as const, label: 'Aiguilles' },
+                                        ].map(tab => (
+                                            <button
+                                                key={tab.id}
+                                                type="button"
+                                                onClick={() => setMaterialsFilter(tab.id)}
+                                                className={`px-3 py-2 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
+                                                    materialsFilter === tab.id
+                                                        ? 'bg-primary text-background shadow-lg shadow-primary/20'
+                                                        : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+                                                }`}
+                                            >
+                                                {tab.label}
+                                            </button>
+                                        ))}
+                                    </div>
+
+                                    <p className="text-xs text-zinc-400">
+                                        Ajoutez/supprimez les matériaux du projet
+                                    </p>
+
+                                    <div className="flex flex-col gap-2 max-h-[45vh] overflow-y-auto pr-1 scrollbar-hide">
+                                        {filteredAllMaterials.map((mat) => {
+                                            const isSelected = tempMaterialIds.includes(mat.id);
+                                            return (
+                                                <button
+                                                    key={mat.id}
+                                                    type="button"
+                                                    onClick={() => toggleTempMaterial(mat.id)}
+                                                    className={`p-3 rounded-xl border transition-all flex items-start justify-between gap-3 text-left ${
+                                                        isSelected
+                                                            ? 'bg-secondary border-primary text-white shadow-[0_0_10px_-3px_rgba(196,181,254,0.5)]'
+                                                            : 'bg-zinc-900/30 border-zinc-800 text-zinc-300 hover:border-zinc-600'
+                                                    }`}
+                                                >
+                                                    <div className="flex items-start gap-3 min-w-0">
+                                                        <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-xl shrink-0">
+                                                            {getIcon(mat.category_type)}
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <p className="font-semibold truncate">{mat.name}</p>
+                                                            <p className="text-xs text-zinc-400 mt-0.5">
+                                                                {[
+                                                                    mat.size ? `${mat.size}mm` : undefined,
+                                                                    mat.brand,
+                                                                    mat.material_composition,
+                                                                    mat.color_number ? `couleur ${mat.color_number}` : undefined,
+                                                                    typeof mat.yardage_meters === 'number' ? `${mat.yardage_meters}m` : undefined,
+                                                                    typeof mat.grammage_grams === 'number' ? `${mat.grammage_grams}g` : undefined,
+                                                                ].filter(Boolean).join(' - ') || '—'}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <div className={`w-6 h-6 rounded-full border flex items-center justify-center shrink-0 mt-1 ${
+                                                        isSelected ? 'bg-primary border-primary text-background' : 'border-zinc-600 text-transparent'
+                                                    }`}>
+                                                        <Check size={14} strokeWidth={3} />
+                                                    </div>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </>
+                            )}
+
+                            <div className="flex gap-3 pt-2">
+                                <Button
+                                    variant="secondary"
+                                    onClick={() => {
+                                        setMaterialsMode('view');
+                                        setTempMaterialIds(selectedMaterialIds);
+                                        setMaterialsFilter('all');
+                                        setMaterialsSearch('');
+                                    }}
+                                    className="flex-1"
+                                >
+                                    Retour
+                                </Button>
+                                <Button onClick={handleSaveMaterials} className="flex-1">
+                                    Enregistrer
+                                </Button>
                             </div>
-                            <Button onClick={handleSaveMaterials} className="w-full mt-4">
-                                Enregistrer
-                            </Button>
                         </>
                     )}
                 </div>

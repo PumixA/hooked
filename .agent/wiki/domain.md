@@ -47,7 +47,7 @@
 ### Material
 
 - **Definition**: A physical crafting supply in the user's inventory (hook, yarn, or needle)
-- **Type**: `interface { id: string; category_type: MaterialType; name: string; size?: string; brand?: string; material_composition?: string; }`
+- **Type**: `interface { id: string; category_type: MaterialType; name: string; size?: string; brand?: string; material_composition?: string; description?: string; color_number?: string; yardage_meters?: number; grammage_grams?: number; }`
 - **Context**: Managed in Inventory pages. Can be linked to Projects via project_materials
 - **Synonyms to avoid**: item, supply, tool, equipment
 

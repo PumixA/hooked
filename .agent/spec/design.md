@@ -202,6 +202,10 @@ erDiagram
         VARCHAR size
         VARCHAR brand
         VARCHAR material_composition
+        TEXT description "nullable"
+        VARCHAR color_number "nullable"
+        INT yardage_meters "nullable"
+        INT grammage_grams "nullable"
         TIMESTAMPTZ updated_at
     }
 

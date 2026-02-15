@@ -14,6 +14,12 @@
 
 ## 2026-02-15
 
+- [2026-02-15 23:07] codex | chore(git): prepare commit for material details and counter reset
+- [2026-02-15 23:06] codex | docs(spec): document material details and counter reset behavior
+- [2026-02-15 23:03] codex | feat(projects): add reset-to-zero button on project counter screen
+- [2026-02-15 22:59] codex | fix(inventory): add free-text material description field (offline-first + sync)
+- [2026-02-15 22:49] codex | fix(inventory): show size in titles and replace descriptif fields (color/yardage/grammage)
+- [2026-02-15 22:32] codex | feat(inventory): add material descriptifs and project-level manage menu for add/remove
 - [2026-02-15 22:12] codex | fix(docker): generate prisma client before typescript build in backend image
 - [2026-02-15 21:59] codex | feat(projects): allow steps without target rows and add in-page step switching + description display
 - [2026-02-15 21:46] codex | feat(projects): move step management into counter screen and give each step its own counter
