@@ -47,6 +47,10 @@
 - [ ] Giant counter displaying current row
 - [ ] Violet (+) button to increment by `increment_step`
 - [ ] Discreet (-) button to decrement
+- [ ] Optional step-by-step mode: define project steps with target rows and per-step instruction memo
+- [ ] When steps are defined, the UI shows the current step, its progress, and the instruction memo under the counter
+- [ ] Each step has its own row counter (`current_rows`) and target
+- [ ] When a step counter reaches its target, the app automatically advances to the next step
 - [ ] Integrated stopwatch with start/pause/stop
 - [ ] Stopwatch uses real clock time and stays accurate after device sleep/background
 - [ ] Session recording (start_time, end_time, duration)

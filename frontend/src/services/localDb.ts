@@ -4,6 +4,11 @@
  */
 
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
+import {
+    normalizeActiveStepIndex,
+    sanitizeProjectSteps,
+    type ProjectStep
+} from './projectSteps';
 
 declare global {
     interface Window {
@@ -30,6 +35,8 @@ export interface LocalProject {
     cover_file_path?: string;
     cover_base64?: string;
     cover_sync_status?: 'synced' | 'pending';
+    project_steps?: ProjectStep[];
+    active_step_index?: number;
     // Métadonnées de sync
     _syncStatus: 'synced' | 'pending' | 'conflict';
     _localUpdatedAt: number;
@@ -260,6 +267,18 @@ export const localDb = {
         const coverSyncStatusValue = hasCoverSyncStatusProp
             ? project.cover_sync_status
             : (existing?.cover_sync_status ?? 'synced');
+        const hasProjectStepsProp = 'project_steps' in project;
+        const projectStepsValue = hasProjectStepsProp
+            ? sanitizeProjectSteps(project.project_steps)
+            : sanitizeProjectSteps(existing?.project_steps);
+        const hasActiveStepIndexProp = 'active_step_index' in project;
+        const requestedActiveStepIndex = hasActiveStepIndexProp ? project.active_step_index : existing?.active_step_index;
+        const activeStepIndexValue = projectStepsValue.length > 0
+            ? normalizeActiveStepIndex(
+                requestedActiveStepIndex ?? 0,
+                projectStepsValue,
+            )
+            : 0;
 
         const fullProject: LocalProject = {
             id: project.id,
@@ -276,6 +295,8 @@ export const localDb = {
             cover_file_path: coverFilePathValue,
             cover_base64: coverBase64Value,
             cover_sync_status: coverSyncStatusValue,
+            project_steps: projectStepsValue,
+            active_step_index: activeStepIndexValue,
             _syncStatus: syncStatus,
             _localUpdatedAt: now,
             _isLocal: project._isLocal ?? existing?._isLocal ?? true,
@@ -623,6 +644,7 @@ export const localDb = {
                 }
 
                 // Fusionner intelligemment
+                const mergedProjectSteps = sanitizeProjectSteps(p.project_steps ?? existing?.project_steps);
                 const mergedProject = {
                     ...p,
                     // Garder les valeurs locales si elles sont supérieures (évite de perdre le travail)
@@ -632,6 +654,11 @@ export const localDb = {
                     cover_base64: existing?.cover_base64,
                     cover_file_path: p.cover_file_path ?? existing?.cover_file_path,
                     cover_sync_status: 'synced' as const,
+                    project_steps: mergedProjectSteps,
+                    active_step_index: normalizeActiveStepIndex(
+                        p.active_step_index ?? existing?.active_step_index,
+                        mergedProjectSteps,
+                    ),
                     _syncStatus: 'synced' as const,
                     _localUpdatedAt: Date.now(),
                     _isLocal: false,

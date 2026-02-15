@@ -214,6 +214,13 @@ class SyncService {
                         status: project.status || 'in_progress',
                     };
 
+                    if (project.project_steps !== undefined) {
+                        createData.project_steps = project.project_steps;
+                    }
+                    if (project.active_step_index !== undefined) {
+                        createData.active_step_index = project.active_step_index;
+                    }
+
                     // Convertir category_id local en UUID si necessaire
                     if (project.category_id) {
                         const categoryUuid = await this.getCategoryUuid(project.category_id);
@@ -263,6 +270,12 @@ class SyncService {
                         // Envoyer end_date: null si undefined pour permettre de reprendre un projet
                         end_date: project.end_date || null,
                     };
+                    if (project.project_steps !== undefined) {
+                        updateData.project_steps = project.project_steps;
+                    }
+                    if (project.active_step_index !== undefined) {
+                        updateData.active_step_index = project.active_step_index;
+                    }
                     // Convertir les material_ids locaux en UUIDs serveur
                     if (project.material_ids && project.material_ids.length > 0) {
                         const convertedMaterialIds: string[] = [];
@@ -694,6 +707,8 @@ class SyncService {
             cover_file_path: projectData.cover_file_path,
             cover_base64: projectData.cover_base64,
             cover_sync_status: projectData.cover_sync_status,
+            project_steps: projectData.project_steps,
+            active_step_index: projectData.active_step_index,
             created_at: projectData.created_at,
             end_date: projectData.end_date,
             _syncStatus: 'synced',

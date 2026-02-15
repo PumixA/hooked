@@ -20,6 +20,17 @@
 
 <!-- Entries below this line. Most recent on top. -->
 
+## [2026-02-15] Project steps stored on projects as JSONB with active step index
+
+- **Agent**: codex
+- **Context**: Step-by-step project flow requires storing a list of steps (title, target rows, instruction memo) and tracking which step is active, while preserving offline-first behavior and simple sync.
+- **Options considered**: (A) New relational table `project_steps` + CRUD endpoints, (B) Store steps as `JSONB` in `projects` with an `active_step_index`.
+- **Decision**: Option B. JSONB keeps the model simple, reduces endpoint surface, and fits the offline-first "project as aggregate" sync approach (push/pull projects already exists).
+- **Consequences**:
+  - Backend `projects` now includes `project_steps` (JSONB) and `active_step_index` (int).
+  - Frontend LocalProject extended with `project_steps` and `active_step_index`.
+  - Sync pipeline pushes/pulls these fields with the existing project sync flow.
+
 ## [2026-02-13] Hash routing, timer runtime metadata, and dedicated project cover flow
 
 - **Agent**: codex

@@ -186,6 +186,8 @@ erDiagram
         INT increment_step "default 1"
         INT total_duration
         VARCHAR cover_file_path "nullable"
+        JSONB project_steps "nullable"
+        INT active_step_index "default 0"
         TIMESTAMPTZ start_date
         TIMESTAMPTZ end_date "nullable"
         TIMESTAMPTZ created_at
