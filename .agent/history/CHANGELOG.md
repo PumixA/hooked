@@ -14,6 +14,9 @@
 
 ## 2026-02-15
 
+- [2026-02-15 21:59] codex | feat(projects): allow steps without target rows and add in-page step switching + description display
+- [2026-02-15 21:46] codex | feat(projects): move step management into counter screen and give each step its own counter
+- [2026-02-15 21:37] codex | feat(projects): add step-by-step project flow with per-step targets and instruction memo (offline-first + sync)
 - [2026-02-15 21:21] codex | fix(pwa): keep lockscreen counter alive with service worker active state and robust app-open handling
 - [2026-02-15 21:11] codex | fix(pwa): trigger lockscreen counter notification from user gesture with dual path (direct + service worker mirror)
 

@@ -18,7 +18,7 @@
 ### Project
 
 - **Definition**: A knitting or crochet work being tracked by the user, with a row counter, timer, notes, and photos
-- **Type**: `interface { id: string; title: string; current_row: number; goal_rows: number | null; status: ProjectStatus; category_id: string; increment_step: number; total_duration: number; cover_file_path?: string; cover_base64?: string; }`
+- **Type**: `interface { id: string; title: string; current_row: number; goal_rows: number | null; status: ProjectStatus; category_id: string; increment_step: number; total_duration: number; cover_file_path?: string; cover_base64?: string; project_steps?: ProjectStep[]; active_step_index?: number; }`
 - **Context**: Core entity. Displayed on Dashboard, managed in ProjectDetail
 - **Synonyms to avoid**: task, item, work
 
@@ -28,6 +28,13 @@
 - **Type**: `interface { cover_file_path?: string; cover_base64?: string; cover_sync_status?: 'synced' | 'pending'; }`
 - **Context**: Dashboard card uses app logo by default; if a ProjectCover is defined, it is displayed instead and synchronized when cloud sync is active
 - **Synonyms to avoid**: heroImage, banner, thumbnail
+
+### ProjectStep
+
+- **Definition**: A named step within a Project that has its own target rows and an optional instruction memo (step-by-step project flow).
+- **Type**: `interface { id: string; title: string; target_rows?: number | null; current_rows: number; instruction?: string; }`
+- **Context**: Stored in `projects.project_steps` (JSON) and shown under the counter on ProjectDetail. Auto-advances when the current row reaches the step boundary.
+- **Synonyms to avoid**: section, phase (reserved), milestone
 
 ### Category
 

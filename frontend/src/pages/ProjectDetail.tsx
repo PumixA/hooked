@@ -1,12 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings, TrendingUp, ImagePlus, Trash2, CheckCircle, Flag, X, ChevronLeft, ChevronRight, Check, Package, RotateCcw } from 'lucide-react';
+import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings, TrendingUp, ImagePlus, Trash2, CheckCircle, Flag, X, ChevronLeft, ChevronRight, Check, Package, RotateCcw, ListOrdered } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import Timer from '../components/features/Timer';
 import Modal from '../components/ui/Modal';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import { resolveServerFilePath } from '../services/media';
+import {
+    getTotalRowsFromSteps,
+    normalizeActiveStepIndex,
+    sanitizeProjectSteps,
+    type ProjectStep
+} from '../services/projectSteps';
 import {
     clearProjectCounterNotification,
     requestNotificationPermission,
@@ -96,7 +102,7 @@ export default function ProjectDetail() {
         onSaveSession: saveSession,
     });
 
-    const [step, setStep] = useState(1);
+    const [incrementStep, setIncrementStep] = useState(1);
     const [showNotes, setShowNotes] = useState(false);
     const [showPhotos, setShowPhotos] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
@@ -121,14 +127,44 @@ export default function ProjectDetail() {
     const [tempGoal, setTempGoal] = useState<string>('');
     const [tempTitle, setTempTitle] = useState<string>('');
     const [tempTimer, setTempTimer] = useState<string>('');
+    const [tempProjectSteps, setTempProjectSteps] = useState<ProjectStep[]>([]);
+    const [newStepTitle, setNewStepTitle] = useState('');
+    const [newStepTargetRows, setNewStepTargetRows] = useState('');
+    const [newStepInstruction, setNewStepInstruction] = useState('');
     const [noteContent, setNoteContent] = useState('');
     const [coverPreview, setCoverPreview] = useState<string>('/logo-mini.svg');
+    const [showStepsManager, setShowStepsManager] = useState(false);
+
+    const openStepsManager = () => {
+        setTempProjectSteps(sanitizeProjectSteps(project?.project_steps));
+        setShowStepsManager(true);
+    };
+
+    const setActiveProjectStepIndex = (nextIndex: number) => {
+        if (!id || !project) return;
+        const steps = sanitizeProjectSteps(project.project_steps);
+        if (steps.length === 0) return;
+
+        const safeIndex = Math.min(Math.max(nextIndex, 0), steps.length - 1);
+
+        // Optimistic update
+        queryClient.setQueryData(['projects', id], (old: Record<string, unknown>) => ({
+            ...old,
+            active_step_index: safeIndex,
+        }));
+
+        updateProjectMutation.mutate({
+            id,
+            active_step_index: safeIndex,
+        });
+    };
 
     useEffect(() => {
         if (project) {
             setTempGoal(project.goal_rows ? project.goal_rows.toString() : '');
             setTempTitle(project.title);
             setSelectedMaterialIds(project.material_ids || []);
+            setTempProjectSteps(sanitizeProjectSteps(project.project_steps));
             setCoverPreview(project.cover_base64 || resolveServerFilePath(project.cover_file_path) || '/logo-mini.svg');
         }
     }, [project]);
@@ -264,19 +300,86 @@ export default function ProjectDetail() {
         return `Fin estimée dans ${h > 0 ? `${h}h ` : ''}${m}m`;
     };
 
+    const addProjectStep = () => {
+        const title = newStepTitle.trim();
+        const targetRows = newStepTargetRows.trim() ? parseInt(newStepTargetRows, 10) : null;
+        const instruction = newStepInstruction.trim();
+
+        if (!title) return;
+        if (targetRows !== null && (Number.isNaN(targetRows) || targetRows <= 0)) return;
+
+        setTempProjectSteps((prev) => [
+            ...prev,
+            {
+                id: `local-step-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                title,
+                target_rows: targetRows,
+                current_rows: 0,
+                instruction: instruction || undefined,
+            }
+        ]);
+        setNewStepTitle('');
+        setNewStepTargetRows('');
+        setNewStepInstruction('');
+    };
+
+    const updateProjectStep = (stepIndex: number, patch: Partial<ProjectStep>) => {
+        setTempProjectSteps((prev) => prev.map((stepItem, index) => {
+            if (index !== stepIndex) return stepItem;
+
+            return {
+                ...stepItem,
+                ...patch,
+            };
+        }));
+    };
+
+    const removeProjectStep = (stepIndex: number) => {
+        setTempProjectSteps((prev) => prev.filter((_, index) => index !== stepIndex));
+    };
+
     const updateCounter = useCallback((increment: number) => {
         if (!project || !id || project.status === 'completed') return;
 
-        const amount = increment * step;
-        const currentRow = project.current_row || 0;
-        const newCount = Math.max(0, currentRow + amount);
+        const amount = increment * incrementStep;
+        const normalizedSteps = sanitizeProjectSteps(project.project_steps);
 
-        const updates: { id: string; current_row: number; status?: string; end_date?: string } = {
-            id,
-            current_row: newCount
-        };
+        const updates: Record<string, unknown> = { id };
 
-        if (project.goal_rows && newCount >= project.goal_rows && project.status !== 'completed') {
+        if (normalizedSteps.length === 0) {
+            const currentRow = project.current_row || 0;
+            const newCount = Math.max(0, currentRow + amount);
+            updates.current_row = newCount;
+        } else {
+            const activeIndex = normalizeActiveStepIndex(project.active_step_index, normalizedSteps);
+            const updatedSteps = normalizedSteps.map((stepItem, index) => {
+                if (index !== activeIndex) return stepItem;
+                return {
+                    ...stepItem,
+                    current_rows: Math.max(0, (stepItem.current_rows || 0) + amount),
+                };
+            });
+
+            const currentStep = updatedSteps[activeIndex];
+            let nextActiveIndex = activeIndex;
+            const stepTarget = typeof currentStep.target_rows === 'number' ? currentStep.target_rows : null;
+            if (amount > 0 && stepTarget !== null && currentStep.current_rows >= stepTarget) {
+                nextActiveIndex = Math.min(activeIndex + 1, updatedSteps.length - 1);
+                if (nextActiveIndex !== activeIndex) {
+                    setToastMessage(`Étape suivante: ${updatedSteps[nextActiveIndex].title}`);
+                }
+            }
+
+            updates.project_steps = updatedSteps;
+            updates.active_step_index = nextActiveIndex;
+            updates.current_row = getTotalRowsFromSteps(updatedSteps);
+        }
+
+        const totalRows = typeof updates.current_row === 'number'
+            ? (updates.current_row as number)
+            : (project.current_row || 0);
+
+        if (project.goal_rows && totalRows >= project.goal_rows && project.status !== 'completed') {
             updates.status = 'completed';
             updates.end_date = new Date().toISOString();
         }
@@ -287,8 +390,8 @@ export default function ProjectDetail() {
             ...updates
         }));
 
-        updateProjectMutation.mutate(updates);
-    }, [id, project, queryClient, step, updateProjectMutation]);
+        updateProjectMutation.mutate(updates as { id: string } & Record<string, unknown>);
+    }, [id, incrementStep, project, queryClient, updateProjectMutation]);
 
     const handleToggleTimerFromUI = useCallback(async () => {
         if (!id || !project || project.status === 'completed') return;
@@ -373,7 +476,7 @@ export default function ProjectDetail() {
 
     const handleSaveSettings = () => {
         if (!project || !id) return;
-        const newGoal = tempGoal ? parseInt(tempGoal) : undefined;
+        const newGoal = tempGoal ? parseInt(tempGoal, 10) : undefined;
 
         const [h, m, s] = tempTimer.split(':').map(Number);
         let newElapsed = elapsed;
@@ -385,11 +488,18 @@ export default function ProjectDetail() {
 
         // Si le projet est terminé et qu'on augmente l'objectif au-delà du nombre de rangs actuel,
         // remettre automatiquement le projet en cours
-        const updates: { id: string; title: string; goal_rows: number | undefined; total_duration: number; status?: string; end_date?: string | undefined } = {
+        const updates: {
+            id: string;
+            title: string;
+            goal_rows: number | undefined;
+            total_duration: number;
+            status?: string;
+            end_date?: string | undefined;
+        } = {
             id,
             title: tempTitle,
             goal_rows: newGoal,
-            total_duration: newElapsed
+            total_duration: newElapsed,
         };
 
         if (project.status === 'completed' && newGoal && newGoal > (project.current_row || 0)) {
@@ -533,7 +643,18 @@ export default function ProjectDetail() {
 
     const estimation = getEstimation();
     const isCompleted = project.status === 'completed';
-    const currentRowDisplay = project.current_row || 0;
+    const projectSteps = sanitizeProjectSteps(project.project_steps);
+    const hasProjectSteps = projectSteps.length > 0;
+    const activeStepIndex = hasProjectSteps
+        ? normalizeActiveStepIndex(project.active_step_index ?? 0, projectSteps)
+        : 0;
+    const activeProjectStep = hasProjectSteps ? projectSteps[activeStepIndex] : null;
+    const stepRowDisplay = hasProjectSteps ? (activeProjectStep?.current_rows || 0) : (project.current_row || 0);
+    const totalRowDisplay = hasProjectSteps ? getTotalRowsFromSteps(projectSteps) : (project.current_row || 0);
+    const activeStepTargetRows = typeof activeProjectStep?.target_rows === 'number' ? activeProjectStep.target_rows : null;
+    const activeStepRowsRemaining = hasProjectSteps
+        ? (activeStepTargetRows === null ? 0 : Math.max(0, activeStepTargetRows - (activeProjectStep?.current_rows || 0)))
+        : 0;
 
     return (
         <div className="h-[100dvh] w-screen bg-background text-white flex flex-col animate-fade-in overflow-hidden">
@@ -552,6 +673,14 @@ export default function ProjectDetail() {
                 </h1>
 
                 <div className="flex justify-end gap-1">
+                    <button
+                        type="button"
+                        onClick={openStepsManager}
+                        className="p-2 rounded-full bg-zinc-800 text-zinc-400 hover:text-white transition"
+                        title="Étapes"
+                    >
+                        <ListOrdered size={18} />
+                    </button>
                     {isCompleted ? (
                         <button onClick={() => setShowResumeConfirm(true)} className="p-2 rounded-full bg-zinc-800 text-amber-400 hover:text-amber-300 transition">
                             <RotateCcw size={18} />
@@ -579,6 +708,48 @@ export default function ProjectDetail() {
                             onReset={handleResetTimer}
                         />
                     </div>
+                    {hasProjectSteps && activeProjectStep && (
+                        <div className="mt-1 flex flex-col items-center gap-1 px-4">
+                            <div className="flex items-center justify-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setActiveProjectStepIndex(activeStepIndex - 1)}
+                                    disabled={activeStepIndex <= 0}
+                                    className="w-9 h-9 rounded-full bg-zinc-800 text-zinc-400 disabled:opacity-40 flex items-center justify-center"
+                                    title="Étape précédente"
+                                >
+                                    <ChevronLeft size={18} />
+                                </button>
+
+                                <button
+                                    type="button"
+                                    onClick={openStepsManager}
+                                    className="px-3 py-2 rounded-xl bg-zinc-800/70 border border-zinc-700 text-center hover:bg-zinc-800 transition"
+                                >
+                                    <p className="text-[10px] uppercase tracking-wide text-primary font-semibold">
+                                        Étape {activeStepIndex + 1}/{projectSteps.length}
+                                    </p>
+                                    <p className="text-sm font-semibold text-white">{activeProjectStep.title}</p>
+                                </button>
+
+                                <button
+                                    type="button"
+                                    onClick={() => setActiveProjectStepIndex(activeStepIndex + 1)}
+                                    disabled={activeStepIndex >= projectSteps.length - 1}
+                                    className="w-9 h-9 rounded-full bg-zinc-800 text-zinc-400 disabled:opacity-40 flex items-center justify-center"
+                                    title="Étape suivante"
+                                >
+                                    <ChevronRight size={18} />
+                                </button>
+                            </div>
+
+                            {activeProjectStep.instruction && (
+                                <p className="text-xs text-zinc-300 text-center max-w-sm">
+                                    {activeProjectStep.instruction}
+                                </p>
+                            )}
+                        </div>
+                    )}
                     {estimation && (
                         <div className="inline-flex items-center gap-2 px-2 py-0.5 rounded-full bg-green-400/10 text-green-400 text-[10px] font-medium animate-fade-in border border-green-400/20 -mt-1">
                             <TrendingUp size={10} />
@@ -589,13 +760,26 @@ export default function ProjectDetail() {
 
                 <div className="flex-1 flex flex-col items-center justify-center min-h-0 relative">
                     <div className={`text-[20vh] font-bold leading-none tracking-tighter select-none flex items-center justify-center transition-colors ${isCompleted ? 'text-green-400' : ''}`}>
-                        {currentRowDisplay}
+                        {stepRowDisplay}
                     </div>
 
-                    <div className="flex flex-col items-center gap-1 mt-1">
-                        {!isCompleted && step > 1 && (
+                    <div className="flex flex-col items-center gap-2 mt-1 px-4">
+                        {!isCompleted && incrementStep > 1 && (
                             <div className="bg-primary/20 text-primary text-[10px] px-2 py-0.5 rounded-full font-bold">
-                                Pas : +/- {step}
+                                Pas : +/- {incrementStep}
+                            </div>
+                        )}
+
+                        {hasProjectSteps && activeProjectStep && (
+                            <div className="bg-zinc-800/70 border border-zinc-700 rounded-xl px-3 py-2 text-center max-w-xs">
+                                <p className="text-[11px] text-zinc-300">
+                                    {activeProjectStep.current_rows}
+                                    {activeStepTargetRows !== null ? `/${activeStepTargetRows}` : ''} rangs
+                                    {activeStepTargetRows !== null ? ` • reste ${activeStepRowsRemaining}` : ''}
+                                </p>
+                                <p className="text-[10px] text-zinc-500 mt-1">
+                                    Total: {totalRowDisplay}
+                                </p>
                             </div>
                         )}
 
@@ -643,6 +827,150 @@ export default function ProjectDetail() {
             </div>
 
             {/* MODALS */}
+            <Modal isOpen={showStepsManager} onClose={() => setShowStepsManager(false)} title="Étapes">
+                <div className="space-y-4">
+                    {tempProjectSteps.length === 0 ? (
+                        <p className="text-sm text-zinc-400">
+                            Crée des étapes pour avoir un compteur par section (ex: Côtes, Corps, Manches).
+                        </p>
+                    ) : (
+                        <div className="space-y-3">
+                                    {tempProjectSteps.map((stepItem, index) => (
+                                <div
+                                    key={stepItem.id}
+                                    className={`rounded-xl border p-3 ${
+                                        index === activeStepIndex
+                                            ? 'border-primary bg-primary/10'
+                                            : 'border-zinc-700 bg-zinc-900/50'
+                                    }`}
+                                >
+                                    <div className="flex items-center justify-between gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                if (!id) return;
+                                                updateProjectMutation.mutate({
+                                                    id,
+                                                    active_step_index: index,
+                                                });
+                                            }}
+                                            className="text-left"
+                                        >
+                                            <p className="text-white font-semibold">{stepItem.title}</p>
+                                            <p className="text-xs text-zinc-400 mt-1">
+                                                {stepItem.current_rows}
+                                                {typeof stepItem.target_rows === 'number' ? `/${stepItem.target_rows}` : ''} rangs
+                                            </p>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => removeProjectStep(index)}
+                                            className="text-xs text-red-400 hover:text-red-300"
+                                        >
+                                            Retirer
+                                        </button>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-2 mt-3">
+                                        <Input
+                                            value={stepItem.title}
+                                            onChange={(event) => updateProjectStep(index, { title: event.target.value })}
+                                            placeholder="Nom"
+                                        />
+                                        <Input
+                                            type="number"
+                                            value={stepItem.target_rows ?? ''}
+                                            onChange={(event) => {
+                                                const raw = event.target.value.trim();
+                                                if (!raw) {
+                                                    updateProjectStep(index, { target_rows: null });
+                                                    return;
+                                                }
+                                                const value = parseInt(raw, 10);
+                                                if (Number.isNaN(value) || value <= 0) return;
+                                                updateProjectStep(index, { target_rows: value });
+                                            }}
+                                            placeholder="Objectif (optionnel)"
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2 mt-2">
+                                        <Input
+                                            type="number"
+                                            min={0}
+                                            value={stepItem.current_rows}
+                                            onChange={(event) => {
+                                                const value = parseInt(event.target.value, 10);
+                                                if (Number.isNaN(value)) return;
+                                                updateProjectStep(index, { current_rows: Math.max(0, value) });
+                                            }}
+                                            placeholder="Compteur"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => updateProjectStep(index, { current_rows: 0 })}
+                                            className="rounded-xl border border-zinc-700 bg-zinc-800 text-zinc-300 font-semibold"
+                                        >
+                                            Reset
+                                        </button>
+                                    </div>
+                                    <textarea
+                                        value={stepItem.instruction || ''}
+                                        onChange={(event) => updateProjectStep(index, { instruction: event.target.value })}
+                                        placeholder="Mémo"
+                                        className="w-full min-h-20 bg-zinc-800/60 text-white p-3 rounded-lg border border-zinc-700 resize-none text-sm mt-2"
+                                    />
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    <div className="rounded-xl border border-dashed border-zinc-700 p-3 space-y-2">
+                        <Input
+                            value={newStepTitle}
+                            onChange={(event) => setNewStepTitle(event.target.value)}
+                            placeholder="Nouvelle étape"
+                        />
+                        <Input
+                            type="number"
+                            value={newStepTargetRows}
+                            onChange={(event) => setNewStepTargetRows(event.target.value)}
+                            placeholder="Objectif rangs (optionnel)"
+                        />
+                        <textarea
+                            value={newStepInstruction}
+                            onChange={(event) => setNewStepInstruction(event.target.value)}
+                            placeholder="Instruction optionnelle"
+                            className="w-full min-h-20 bg-zinc-800/60 text-white p-3 rounded-lg border border-zinc-700 resize-none text-sm"
+                        />
+                        <Button type="button" variant="secondary" onClick={addProjectStep}>
+                            Ajouter l'étape
+                        </Button>
+                    </div>
+
+                    <Button
+                        type="button"
+                        onClick={() => {
+                            if (!id || !project) return;
+                            const normalizedSteps = sanitizeProjectSteps(tempProjectSteps);
+                            const computedTotalRows = normalizedSteps.length > 0 ? getTotalRowsFromSteps(normalizedSteps) : (project.current_row || 0);
+                            const nextActive = normalizedSteps.length > 0
+                                ? Math.min(activeStepIndex, normalizedSteps.length - 1)
+                                : 0;
+                            updateProjectMutation.mutate({
+                                id,
+                                project_steps: normalizedSteps,
+                                active_step_index: nextActive,
+                                current_row: computedTotalRows,
+                            });
+                            setShowStepsManager(false);
+                            setToastMessage('Étapes mises à jour');
+                        }}
+                    >
+                        Enregistrer les étapes
+                    </Button>
+                </div>
+            </Modal>
+
             <Modal isOpen={showSettings} onClose={() => setShowSettings(false)} title="Réglages du projet">
                 <div className="space-y-6">
                     <input
@@ -659,7 +987,7 @@ export default function ProjectDetail() {
                         <label className="text-xs text-zinc-400 ml-1">Pas d'incrémentation</label>
                         <div className="flex gap-2">
                             {[1, 2, 5, 10].map((val) => (
-                                <button key={val} onClick={() => setStep(val)} className={`flex-1 py-3 rounded-xl font-bold transition-all ${step === val ? 'bg-primary text-background' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}>{val}</button>
+                                <button key={val} onClick={() => setIncrementStep(val)} className={`flex-1 py-3 rounded-xl font-bold transition-all ${incrementStep === val ? 'bg-primary text-background' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}>{val}</button>
                             ))}
                         </div>
                     </div>
