@@ -8,7 +8,11 @@ const createMaterialSchema = z.object({
     name: z.string().min(1),
     size: z.string().optional(),
     brand: z.string().optional(),
-    material_composition: z.string().optional()
+    material_composition: z.string().optional(),
+    description: z.string().max(2000).optional(),
+    color_number: z.string().optional(),
+    yardage_meters: z.number().int().min(0).optional(),
+    grammage_grams: z.number().int().min(0).optional(),
 });
 
 // MODIFICATION : On autorise null pour les champs optionnels car le frontend peut envoyer null
@@ -17,7 +21,11 @@ const updateMaterialSchema = z.object({
     name: z.string().min(1).optional(),
     size: z.string().nullable().optional(),
     brand: z.string().nullable().optional(),
-    material_composition: z.string().nullable().optional()
+    material_composition: z.string().nullable().optional(),
+    description: z.string().max(2000).nullable().optional(),
+    color_number: z.string().nullable().optional(),
+    yardage_meters: z.number().int().min(0).nullable().optional(),
+    grammage_grams: z.number().int().min(0).nullable().optional(),
 });
 
 export async function materialsRoutes(server: FastifyInstance) {

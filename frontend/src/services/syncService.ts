@@ -374,6 +374,10 @@ class SyncService {
                         size: material.size,
                         brand: material.brand,
                         material_composition: material.material_composition,
+                        description: material.description,
+                        color_number: material.color_number,
+                        yardage_meters: material.yardage_meters,
+                        grammage_grams: material.grammage_grams,
                     };
                     const response = await api.post('/materials', createData);
                     const serverId = response.data.id;
@@ -391,6 +395,10 @@ class SyncService {
                         size: material.size,
                         brand: material.brand,
                         material_composition: material.material_composition,
+                        description: material.description,
+                        color_number: material.color_number,
+                        yardage_meters: material.yardage_meters,
+                        grammage_grams: material.grammage_grams,
                     };
                     await api.patch(`/materials/${material.id}`, updateData);
                     await localDb.markMaterialSynced(material.id);

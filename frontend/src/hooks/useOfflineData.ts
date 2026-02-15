@@ -155,7 +155,17 @@ export function useCreateMaterial() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: async (data: { category_type: string; name: string; size?: string; brand?: string; material_composition?: string }) => {
+        mutationFn: async (data: {
+            category_type: string;
+            name: string;
+            size?: string;
+            brand?: string;
+            material_composition?: string;
+            description?: string;
+            color_number?: string;
+            yardage_meters?: number;
+            grammage_grams?: number;
+        }) => {
             const id = generateLocalId();
             const material = await localDb.saveMaterial({
                 id,
@@ -164,6 +174,10 @@ export function useCreateMaterial() {
                 size: data.size,
                 brand: data.brand,
                 material_composition: data.material_composition,
+                description: data.description,
+                color_number: data.color_number,
+                yardage_meters: data.yardage_meters,
+                grammage_grams: data.grammage_grams,
                 _isLocal: true,
                 _syncStatus: 'pending'
             });

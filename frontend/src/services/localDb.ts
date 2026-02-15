@@ -50,6 +50,10 @@ export interface LocalMaterial {
     size?: string;
     brand?: string;
     material_composition?: string;
+    description?: string;
+    color_number?: string;
+    yardage_meters?: number;
+    grammage_grams?: number;
     created_at: string;
     updated_at: string;
     _syncStatus: 'synced' | 'pending' | 'conflict';
@@ -372,6 +376,10 @@ export const localDb = {
             size: material.size ?? existing?.size,
             brand: material.brand ?? existing?.brand,
             material_composition: material.material_composition ?? existing?.material_composition,
+            description: material.description ?? existing?.description,
+            color_number: material.color_number ?? existing?.color_number,
+            yardage_meters: material.yardage_meters ?? existing?.yardage_meters,
+            grammage_grams: material.grammage_grams ?? existing?.grammage_grams,
             created_at: existing?.created_at || material.created_at || new Date().toISOString(),
             updated_at: new Date().toISOString(),
             _syncStatus: material._syncStatus ?? existing?._syncStatus ?? 'pending',
