@@ -14,6 +14,7 @@
 
 ## 2026-02-15
 
+- [2026-02-15 22:12] codex | fix(docker): generate prisma client before typescript build in backend image
 - [2026-02-15 21:59] codex | feat(projects): allow steps without target rows and add in-page step switching + description display
 - [2026-02-15 21:46] codex | feat(projects): move step management into counter screen and give each step its own counter
 - [2026-02-15 21:37] codex | feat(projects): add step-by-step project flow with per-step targets and instruction memo (offline-first + sync)
