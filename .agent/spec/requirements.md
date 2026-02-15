@@ -1,6 +1,6 @@
 # Functional Requirements
 
-> Version: 2.1.0
+> Version: 2.2.0
 
 ---
 
@@ -28,10 +28,12 @@
 **Acceptance criteria**:
 - [ ] Display weekly crafting time stats
 - [ ] Show last opened project as featured (large card)
-- [ ] Grid of other projects with progress bars
+- [ ] Grid of other projects cards with compact row information
 - [ ] FAB button (+) for quick project creation
 - [ ] Orange badge "Hors ligne" when offline
 - [ ] Yellow badge showing pending sync count
+- [ ] Featured card uses app logo by default
+- [ ] Featured card switches to project cover photo only when set from Project Settings
 
 ### F2: Project Management (Counter)
 
@@ -45,7 +47,13 @@
 - [ ] Giant counter displaying current row
 - [ ] Violet (+) button to increment by `increment_step`
 - [ ] Discreet (-) button to decrement
+- [ ] Counter can be reset to 0 from the counter screen
+- [ ] Optional step-by-step mode: define project steps with target rows and per-step instruction memo
+- [ ] When steps are defined, the UI shows the current step, its progress, and the instruction memo under the counter
+- [ ] Each step has its own row counter (`current_rows`) and target
+- [ ] When a step counter reaches its target, the app automatically advances to the next step
 - [ ] Integrated stopwatch with start/pause/stop
+- [ ] Stopwatch uses real clock time and stays accurate after device sleep/background
 - [ ] Session recording (start_time, end_time, duration)
 - [ ] Project status: in_progress, completed, archived
 - [ ] Notes (free text per project)
@@ -72,9 +80,13 @@
 
 **Acceptance criteria**:
 - [ ] Filter chips: Tout / Crochets / Laine / Aiguilles
-- [ ] Material cards with name, brand, composition
+- [ ] Material cards with name (and optional size), brand, composition, and optional descriptif (color number, yardage, grammage)
 - [ ] Quick add form per material type
+- [ ] Optional material descriptif fields: color_number, yardage_meters, grammage_grams
+- [ ] Optional free-text material description field
 - [ ] Associate materials with projects (junction table)
+- [ ] Project view displays only associated materials by default
+- [ ] Add/remove project materials from a dedicated "manage materials" menu (not always visible)
 
 ### F5: Offline-First Data
 
@@ -90,6 +102,7 @@
 - [ ] Default categories injected at first launch
 - [ ] Photos stored as base64 in IndexedDB when offline
 - [ ] Local IDs (`local-xxx`) for offline-created entities
+- [ ] Reloading deep routes on Android PWA must not produce a blank screen
 
 ### F6: Cloud Sync (Optional)
 
@@ -105,6 +118,7 @@
 - [ ] Pull new data from server
 - [ ] Last Write Wins conflict resolution
 - [ ] Visual indicators for pending sync items
+- [ ] Project cover photo syncs when cloud sync is enabled
 
 ### F7: Settings
 

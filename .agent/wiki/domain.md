@@ -1,6 +1,6 @@
 # Domain Glossary (Ubiquitous Language)
 
-> Version: 2.1.0
+> Version: 2.2.0
 >
 > Every term in this glossary is the **canonical name** used in code, documentation, and communication.
 > Using a different name for the same concept is a **breaking change**.
@@ -18,9 +18,23 @@
 ### Project
 
 - **Definition**: A knitting or crochet work being tracked by the user, with a row counter, timer, notes, and photos
-- **Type**: `interface { id: string; title: string; current_row: number; goal_rows: number | null; status: ProjectStatus; category_id: string; increment_step: number; total_duration: number; }`
+- **Type**: `interface { id: string; title: string; current_row: number; goal_rows: number | null; status: ProjectStatus; category_id: string; increment_step: number; total_duration: number; cover_file_path?: string; cover_base64?: string; project_steps?: ProjectStep[]; active_step_index?: number; }`
 - **Context**: Core entity. Displayed on Dashboard, managed in ProjectDetail
 - **Synonyms to avoid**: task, item, work
+
+### ProjectCover
+
+- **Definition**: Optional visual cover image for a Project, configured from Project settings
+- **Type**: `interface { cover_file_path?: string; cover_base64?: string; cover_sync_status?: 'synced' | 'pending'; }`
+- **Context**: Dashboard card uses app logo by default; if a ProjectCover is defined, it is displayed instead and synchronized when cloud sync is active
+- **Synonyms to avoid**: heroImage, banner, thumbnail
+
+### ProjectStep
+
+- **Definition**: A named step within a Project that has its own target rows and an optional instruction memo (step-by-step project flow).
+- **Type**: `interface { id: string; title: string; target_rows?: number | null; current_rows: number; instruction?: string; }`
+- **Context**: Stored in `projects.project_steps` (JSON) and shown under the counter on ProjectDetail. Auto-advances when the current row reaches the step boundary.
+- **Synonyms to avoid**: section, phase (reserved), milestone
 
 ### Category
 
@@ -33,7 +47,7 @@
 ### Material
 
 - **Definition**: A physical crafting supply in the user's inventory (hook, yarn, or needle)
-- **Type**: `interface { id: string; category_type: MaterialType; name: string; size?: string; brand?: string; material_composition?: string; }`
+- **Type**: `interface { id: string; category_type: MaterialType; name: string; size?: string; brand?: string; material_composition?: string; description?: string; color_number?: string; yardage_meters?: number; grammage_grams?: number; }`
 - **Context**: Managed in Inventory pages. Can be linked to Projects via project_materials
 - **Synonyms to avoid**: item, supply, tool, equipment
 

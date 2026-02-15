@@ -17,7 +17,7 @@ export default function AppLayout() {
             <NetworkStatus />
 
             {/* Contenu des pages */}
-            <main className="min-h-screen pb-20">
+            <main className="pb-20">
                 <Outlet />
             </main>
 

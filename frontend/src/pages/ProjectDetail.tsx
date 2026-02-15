@@ -1,12 +1,23 @@
-import { useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings, TrendingUp, ImagePlus, Trash2, CheckCircle, Flag, X, ChevronLeft, ChevronRight, Check, Package, RotateCcw } from 'lucide-react';
+import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings, TrendingUp, ImagePlus, Trash2, CheckCircle, Flag, X, ChevronLeft, ChevronRight, Check, Package, RotateCcw, ListOrdered } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import Timer from '../components/features/Timer';
-import { localDb } from '../services/localDb';
 import Modal from '../components/ui/Modal';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
+import { resolveServerFilePath } from '../services/media';
+import {
+    getTotalRowsFromSteps,
+    normalizeActiveStepIndex,
+    sanitizeProjectSteps,
+    type ProjectStep
+} from '../services/projectSteps';
+import {
+    clearProjectCounterNotification,
+    requestNotificationPermission,
+    showProjectCounterNotification
+} from '../services/lockscreenNotifications';
 import {
     useProject,
     useUpdateProject,
@@ -20,6 +31,7 @@ import {
     useSaveSession,
     useMaterials
 } from '../hooks/useOfflineData';
+import { useProjectTimer } from '../hooks/useProjectTimer';
 
 interface Photo {
     id: string;
@@ -62,70 +74,35 @@ export default function ProjectDetail() {
     const deletePhotoMutation = useDeletePhoto();
     const saveSessionMutation = useSaveSession();
 
-    // Timer state
-    const [elapsed, setElapsed] = useState(0);
-    const [isActive, setIsActive] = useState(false);
-    const startTimeRef = useRef<number | null>(null);
-    const savedTimeRef = useRef<number>(0);
-    const [sessionStartRow, setSessionStartRow] = useState<number | null>(null);
+    const saveDuration = useCallback((seconds: number) => {
+        if (!id) return;
+        updateProjectMutation.mutate({
+            id,
+            total_duration: seconds
+        });
+    }, [id, updateProjectMutation]);
 
-    useEffect(() => {
-        if (project?.total_duration) {
-            setElapsed(project.total_duration);
-            savedTimeRef.current = project.total_duration;
-        }
-    }, [project?.total_duration]);
+    const saveSession = useCallback((payload: { project_id: string; start_time: string; end_time: string; duration_seconds: number }) => {
+        saveSessionMutation.mutate(payload);
+    }, [saveSessionMutation]);
 
-    // Sauvegarde automatique du timer toutes les 30 secondes quand actif
-    useEffect(() => {
-        if (!isActive || !project || !id) return;
+    const {
+        elapsed,
+        isActive,
+        sessionStartRow,
+        toggleTimer: handleToggleTimer,
+        resetTimer: handleResetTimer,
+        setElapsedFromSettings,
+    } = useProjectTimer({
+        projectId: id,
+        projectStatus: project?.status,
+        currentRow: project?.current_row,
+        initialTotalDuration: project?.total_duration,
+        onSaveDuration: saveDuration,
+        onSaveSession: saveSession,
+    });
 
-        const autoSaveInterval = setInterval(() => {
-            const currentElapsed = savedTimeRef.current + Math.floor((Date.now() - (startTimeRef.current || Date.now())) / 1000);
-            updateProjectMutation.mutate({ id, total_duration: currentElapsed });
-            console.log(`[Timer] Auto-save: ${currentElapsed}s`);
-        }, 30000); // Toutes les 30 secondes
-
-        return () => clearInterval(autoSaveInterval);
-    }, [isActive, project, id]);
-
-    // Sauvegarde quand la page perd le focus ou l'app est fermée
-    useEffect(() => {
-        if (!project || !id) return;
-
-        const saveOnHide = () => {
-            if (isActive && startTimeRef.current) {
-                const currentElapsed = savedTimeRef.current + Math.floor((Date.now() - startTimeRef.current) / 1000);
-                // Utiliser sendBeacon pour une sauvegarde fiable même si la page se ferme
-                localDb.saveProject({ id, total_duration: currentElapsed });
-                console.log(`[Timer] Save on visibility change: ${currentElapsed}s`);
-            }
-        };
-
-        const handleVisibilityChange = () => {
-            if (document.visibilityState === 'hidden') {
-                saveOnHide();
-            }
-        };
-
-        const handleBeforeUnload = () => {
-            saveOnHide();
-        };
-
-        document.addEventListener('visibilitychange', handleVisibilityChange);
-        window.addEventListener('beforeunload', handleBeforeUnload);
-        window.addEventListener('pagehide', handleBeforeUnload);
-
-        return () => {
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-            window.removeEventListener('beforeunload', handleBeforeUnload);
-            window.removeEventListener('pagehide', handleBeforeUnload);
-            // Sauvegarder aussi au démontage du composant
-            saveOnHide();
-        };
-    }, [isActive, project, id]);
-
-    const [step, setStep] = useState(1);
+    const [incrementStep, setIncrementStep] = useState(1);
     const [showNotes, setShowNotes] = useState(false);
     const [showPhotos, setShowPhotos] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
@@ -142,19 +119,58 @@ export default function ProjectDetail() {
     const [selectedPhotoIds, setSelectedPhotoIds] = useState<Set<string>>(new Set());
     const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
     const [showMaterials, setShowMaterials] = useState(false);
+    const [materialsMode, setMaterialsMode] = useState<'view' | 'manage'>('view');
+    const [tempMaterialIds, setTempMaterialIds] = useState<string[]>([]);
+    const [materialsFilter, setMaterialsFilter] = useState<'all' | 'hook' | 'yarn' | 'needle'>('all');
+    const [materialsSearch, setMaterialsSearch] = useState('');
     const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
     const photoLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const notificationPermissionRequestedRef = useRef(false);
+    const notificationWasActiveRef = useRef(false);
 
     const [tempGoal, setTempGoal] = useState<string>('');
     const [tempTitle, setTempTitle] = useState<string>('');
     const [tempTimer, setTempTimer] = useState<string>('');
+    const [tempProjectSteps, setTempProjectSteps] = useState<ProjectStep[]>([]);
+    const [newStepTitle, setNewStepTitle] = useState('');
+    const [newStepTargetRows, setNewStepTargetRows] = useState('');
+    const [newStepInstruction, setNewStepInstruction] = useState('');
     const [noteContent, setNoteContent] = useState('');
+    const [coverPreview, setCoverPreview] = useState<string>('/logo-mini.svg');
+    const [showStepsManager, setShowStepsManager] = useState(false);
+
+    const openStepsManager = () => {
+        setTempProjectSteps(sanitizeProjectSteps(project?.project_steps));
+        setShowStepsManager(true);
+    };
+
+    const setActiveProjectStepIndex = (nextIndex: number) => {
+        if (!id || !project) return;
+        const steps = sanitizeProjectSteps(project.project_steps);
+        if (steps.length === 0) return;
+
+        const safeIndex = Math.min(Math.max(nextIndex, 0), steps.length - 1);
+
+        // Optimistic update
+        queryClient.setQueryData(['projects', id], (old: Record<string, unknown>) => ({
+            ...old,
+            active_step_index: safeIndex,
+        }));
+
+        updateProjectMutation.mutate({
+            id,
+            active_step_index: safeIndex,
+        });
+    };
 
     useEffect(() => {
         if (project) {
             setTempGoal(project.goal_rows ? project.goal_rows.toString() : '');
             setTempTitle(project.title);
             setSelectedMaterialIds(project.material_ids || []);
+            setTempMaterialIds(project.material_ids || []);
+            setTempProjectSteps(sanitizeProjectSteps(project.project_steps));
+            setCoverPreview(project.cover_base64 || resolveServerFilePath(project.cover_file_path) || '/logo-mini.svg');
         }
     }, [project]);
 
@@ -174,6 +190,7 @@ export default function ProjectDetail() {
     }, [noteData]);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const coverInputRef = useRef<HTMLInputElement>(null);
 
     const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
         const files = event.target.files;
@@ -187,6 +204,37 @@ export default function ProjectDetail() {
                 );
             });
         }
+    };
+
+    const handleCoverFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file || !id) return;
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            const base64 = reader.result as string;
+            setCoverPreview(base64);
+            updateProjectMutation.mutate({
+                id,
+                cover_base64: base64,
+                cover_sync_status: 'pending'
+            });
+            setToastMessage('Photo de couverture mise à jour');
+        };
+        reader.readAsDataURL(file);
+    };
+
+    const handleRemoveCover = () => {
+        if (!id) return;
+
+        setCoverPreview('/logo-mini.svg');
+        updateProjectMutation.mutate({
+            id,
+            cover_base64: undefined,
+            cover_file_path: undefined,
+            cover_sync_status: 'pending'
+        });
+        setToastMessage('Couverture supprimée');
     };
 
     const openGallery = (index: number) => {
@@ -240,80 +288,6 @@ export default function ProjectDetail() {
         }
     };
 
-    // Timer logic
-    useEffect(() => {
-        let interval: ReturnType<typeof setInterval> | null = null;
-        if (isActive) {
-            interval = setInterval(() => {
-                const now = Date.now();
-                const currentSessionDuration = Math.floor((now - (startTimeRef.current || now)) / 1000);
-                setElapsed(savedTimeRef.current + currentSessionDuration);
-            }, 1000);
-        } else if (interval) {
-            clearInterval(interval);
-        }
-        return () => {
-            if (interval) clearInterval(interval);
-        };
-    }, [isActive]);
-
-    const handleToggleTimer = () => {
-        if (project?.status === 'completed') return;
-
-        if (isActive) {
-            const now = Date.now();
-            const start = startTimeRef.current || now;
-            const duration = Math.floor((now - start) / 1000);
-            // Calculer le temps exact au moment de l'arrêt
-            const exactElapsed = savedTimeRef.current + duration;
-
-            if (duration > 2 && project && id) {
-                saveSessionMutation.mutate({
-                    project_id: id,
-                    start_time: new Date(start).toISOString(),
-                    end_time: new Date(now).toISOString(),
-                    duration_seconds: duration
-                });
-            }
-
-            // Mettre à jour avec le temps exact
-            setElapsed(exactElapsed);
-            savedTimeRef.current = exactElapsed;
-
-            if (project && id) {
-                updateProjectMutation.mutate({
-                    id,
-                    total_duration: exactElapsed
-                });
-            }
-
-            setIsActive(false);
-        } else {
-            startTimeRef.current = Date.now();
-            setIsActive(true);
-            if (sessionStartRow === null && project && project.current_row !== undefined) {
-                setSessionStartRow(project.current_row);
-            }
-        }
-    };
-
-    const handleResetTimer = () => {
-        if (project?.status === 'completed') return;
-
-        setIsActive(false);
-        setElapsed(0);
-        savedTimeRef.current = 0;
-        startTimeRef.current = null;
-        setSessionStartRow(null);
-
-        if (project && id) {
-            updateProjectMutation.mutate({
-                id,
-                total_duration: 0
-            });
-        }
-    };
-
     const getEstimation = () => {
         if (project?.status === 'completed') return "Projet terminé ! 🎉";
         if (!project?.goal_rows || elapsed < 60 || sessionStartRow === null) return null;
@@ -331,24 +305,88 @@ export default function ProjectDetail() {
         return `Fin estimée dans ${h > 0 ? `${h}h ` : ''}${m}m`;
     };
 
-    const updateCounter = (increment: number) => {
+    const addProjectStep = () => {
+        const title = newStepTitle.trim();
+        const targetRows = newStepTargetRows.trim() ? parseInt(newStepTargetRows, 10) : null;
+        const instruction = newStepInstruction.trim();
+
+        if (!title) return;
+        if (targetRows !== null && (Number.isNaN(targetRows) || targetRows <= 0)) return;
+
+        setTempProjectSteps((prev) => [
+            ...prev,
+            {
+                id: `local-step-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                title,
+                target_rows: targetRows,
+                current_rows: 0,
+                instruction: instruction || undefined,
+            }
+        ]);
+        setNewStepTitle('');
+        setNewStepTargetRows('');
+        setNewStepInstruction('');
+    };
+
+    const updateProjectStep = (stepIndex: number, patch: Partial<ProjectStep>) => {
+        setTempProjectSteps((prev) => prev.map((stepItem, index) => {
+            if (index !== stepIndex) return stepItem;
+
+            return {
+                ...stepItem,
+                ...patch,
+            };
+        }));
+    };
+
+    const removeProjectStep = (stepIndex: number) => {
+        setTempProjectSteps((prev) => prev.filter((_, index) => index !== stepIndex));
+    };
+
+    const updateCounter = useCallback((increment: number) => {
         if (!project || !id || project.status === 'completed') return;
 
-        const amount = increment * step;
-        const currentRow = project.current_row || 0;
-        const newCount = Math.max(0, currentRow + amount);
+        const amount = increment * incrementStep;
+        const normalizedSteps = sanitizeProjectSteps(project.project_steps);
 
-        const updates: { id: string; current_row: number; status?: string; end_date?: string } = {
-            id,
-            current_row: newCount
-        };
+        const updates: Record<string, unknown> = { id };
 
-        if (project.goal_rows && newCount >= project.goal_rows && project.status !== 'completed') {
+        if (normalizedSteps.length === 0) {
+            const currentRow = project.current_row || 0;
+            const newCount = Math.max(0, currentRow + amount);
+            updates.current_row = newCount;
+        } else {
+            const activeIndex = normalizeActiveStepIndex(project.active_step_index, normalizedSteps);
+            const updatedSteps = normalizedSteps.map((stepItem, index) => {
+                if (index !== activeIndex) return stepItem;
+                return {
+                    ...stepItem,
+                    current_rows: Math.max(0, (stepItem.current_rows || 0) + amount),
+                };
+            });
+
+            const currentStep = updatedSteps[activeIndex];
+            let nextActiveIndex = activeIndex;
+            const stepTarget = typeof currentStep.target_rows === 'number' ? currentStep.target_rows : null;
+            if (amount > 0 && stepTarget !== null && currentStep.current_rows >= stepTarget) {
+                nextActiveIndex = Math.min(activeIndex + 1, updatedSteps.length - 1);
+                if (nextActiveIndex !== activeIndex) {
+                    setToastMessage(`Étape suivante: ${updatedSteps[nextActiveIndex].title}`);
+                }
+            }
+
+            updates.project_steps = updatedSteps;
+            updates.active_step_index = nextActiveIndex;
+            updates.current_row = getTotalRowsFromSteps(updatedSteps);
+        }
+
+        const totalRows = typeof updates.current_row === 'number'
+            ? (updates.current_row as number)
+            : (project.current_row || 0);
+
+        if (project.goal_rows && totalRows >= project.goal_rows && project.status !== 'completed') {
             updates.status = 'completed';
             updates.end_date = new Date().toISOString();
-            if (isActive) {
-                setIsActive(false);
-            }
         }
 
         // Mise à jour optimiste locale
@@ -357,30 +395,153 @@ export default function ProjectDetail() {
             ...updates
         }));
 
-        updateProjectMutation.mutate(updates);
-    };
+        updateProjectMutation.mutate(updates as { id: string } & Record<string, unknown>);
+    }, [id, incrementStep, project, queryClient, updateProjectMutation]);
+
+    const resetCounterToZero = useCallback(() => {
+        if (!project || !id) return;
+
+        const normalizedSteps = sanitizeProjectSteps(project.project_steps);
+        const updates: Record<string, unknown> = { id };
+
+        if (normalizedSteps.length === 0) {
+            updates.current_row = 0;
+        } else {
+            const activeIndex = normalizeActiveStepIndex(project.active_step_index, normalizedSteps);
+            const updatedSteps = normalizedSteps.map((stepItem, index) => {
+                if (index !== activeIndex) return stepItem;
+                return {
+                    ...stepItem,
+                    current_rows: 0,
+                };
+            });
+            updates.project_steps = updatedSteps;
+            updates.active_step_index = activeIndex;
+            updates.current_row = getTotalRowsFromSteps(updatedSteps);
+        }
+
+        // If the project was completed, resetting implies resuming work.
+        if (project.status === 'completed') {
+            updates.status = 'in_progress';
+            updates.end_date = undefined;
+        }
+
+        queryClient.setQueryData(['projects', id], (old: Record<string, unknown>) => ({
+            ...old,
+            ...updates
+        }));
+
+        updateProjectMutation.mutate(updates as { id: string } & Record<string, unknown>);
+        setToastMessage('Compteur remis à zéro');
+    }, [id, project, queryClient, updateProjectMutation]);
+
+    const handleToggleTimerFromUI = useCallback(async () => {
+        if (!id || !project || project.status === 'completed') return;
+
+        if (!isActive) {
+            if (!notificationPermissionRequestedRef.current) {
+                notificationPermissionRequestedRef.current = true;
+                const permission = await requestNotificationPermission().catch(() => 'denied' as NotificationPermission);
+                if (permission !== 'granted') {
+                    handleToggleTimer();
+                    return;
+                }
+            }
+
+            notificationWasActiveRef.current = true;
+            showProjectCounterNotification({
+                projectId: id,
+                projectTitle: project.title,
+                currentRow: project.current_row || 0,
+            }).catch(console.error);
+        } else {
+            notificationWasActiveRef.current = false;
+            clearProjectCounterNotification(id).catch(console.error);
+        }
+
+        handleToggleTimer();
+    }, [handleToggleTimer, id, isActive, project]);
+
+    useEffect(() => {
+        if (!id || !project) return;
+
+        if (!isActive) {
+            if (notificationWasActiveRef.current) {
+                clearProjectCounterNotification(id).catch(console.error);
+            }
+            notificationWasActiveRef.current = false;
+            return;
+        }
+
+        if (!('Notification' in window) || Notification.permission !== 'granted') return;
+
+        notificationWasActiveRef.current = true;
+
+        const pushNotification = () => {
+            showProjectCounterNotification({
+                projectId: id,
+                projectTitle: project.title,
+                currentRow: project.current_row || 0,
+            }).catch(console.error);
+        };
+
+        pushNotification();
+        const refreshInterval = window.setInterval(pushNotification, 15000);
+        return () => window.clearInterval(refreshInterval);
+    }, [id, isActive, project?.title, project?.current_row]);
+
+    useEffect(() => {
+        if (!('serviceWorker' in navigator) || !id) return;
+
+        const onServiceWorkerMessage = (event: MessageEvent) => {
+            const message = event.data as { type?: string; projectId?: string } | undefined;
+            if (!message || message.projectId !== id) return;
+
+            if (message.type === 'LOCKSCREEN_INCREMENT_ROW') {
+                updateCounter(1);
+                setToastMessage('Rang +1 depuis notification');
+                return;
+            }
+
+            if (message.type === 'LOCKSCREEN_DECREMENT_ROW') {
+                updateCounter(-1);
+                setToastMessage('Rang -1 depuis notification');
+            }
+        };
+
+        navigator.serviceWorker.addEventListener('message', onServiceWorkerMessage);
+
+        return () => {
+            navigator.serviceWorker.removeEventListener('message', onServiceWorkerMessage);
+        };
+    }, [id, updateCounter]);
 
     const handleSaveSettings = () => {
         if (!project || !id) return;
-        const newGoal = tempGoal ? parseInt(tempGoal) : undefined;
+        const newGoal = tempGoal ? parseInt(tempGoal, 10) : undefined;
 
         const [h, m, s] = tempTimer.split(':').map(Number);
         let newElapsed = elapsed;
 
         if (!isNaN(h) && !isNaN(m) && !isNaN(s)) {
             newElapsed = h * 3600 + m * 60 + s;
-            setElapsed(newElapsed);
-            savedTimeRef.current = newElapsed;
-            if (isActive) startTimeRef.current = Date.now();
+            setElapsedFromSettings(newElapsed);
         }
 
         // Si le projet est terminé et qu'on augmente l'objectif au-delà du nombre de rangs actuel,
         // remettre automatiquement le projet en cours
-        const updates: { id: string; title: string; goal_rows: number | undefined; total_duration: number; status?: string; end_date?: string | undefined } = {
+        const updates: {
+            id: string;
+            title: string;
+            goal_rows: number | undefined;
+            total_duration: number;
+            status?: string;
+            end_date?: string | undefined;
+        } = {
             id,
             title: tempTitle,
             goal_rows: newGoal,
-            total_duration: newElapsed
+            total_duration: newElapsed,
         };
 
         if (project.status === 'completed' && newGoal && newGoal > (project.current_row || 0)) {
@@ -403,7 +564,9 @@ export default function ProjectDetail() {
     const handleFinishProject = () => {
         if (!project || !id) return;
 
-        if (isActive) handleToggleTimer();
+        if (isActive) {
+            handleToggleTimerFromUI().catch(console.error);
+        }
 
         updateProjectMutation.mutate({
             id,
@@ -426,8 +589,8 @@ export default function ProjectDetail() {
     };
 
     // Gestion des matériaux
-    const toggleMaterial = (materialId: string) => {
-        setSelectedMaterialIds(prev =>
+    const toggleTempMaterial = (materialId: string) => {
+        setTempMaterialIds(prev =>
             prev.includes(materialId)
                 ? prev.filter(mid => mid !== materialId)
                 : [...prev, materialId]
@@ -438,9 +601,19 @@ export default function ProjectDetail() {
         if (!id) return;
         updateProjectMutation.mutate({
             id,
-            material_ids: selectedMaterialIds
+            material_ids: tempMaterialIds
         });
+        setSelectedMaterialIds(tempMaterialIds);
+        setMaterialsMode('view');
         setShowMaterials(false);
+    };
+
+    const openMaterials = () => {
+        setTempMaterialIds(selectedMaterialIds);
+        setMaterialsMode('view');
+        setMaterialsFilter('all');
+        setMaterialsSearch('');
+        setShowMaterials(true);
     };
 
     const getIcon = (type: string) => {
@@ -454,6 +627,19 @@ export default function ProjectDetail() {
 
     // Matériaux liés au projet
     const projectMaterials = allMaterials.filter(m => selectedMaterialIds.includes(m.id));
+    const filteredAllMaterials = allMaterials
+        .filter(m => (materialsFilter === 'all' ? true : m.category_type === materialsFilter))
+        .filter(m => {
+            const q = materialsSearch.trim().toLowerCase();
+            if (!q) return true;
+            return [
+                m.name,
+                m.brand,
+                m.material_composition,
+                m.color_number,
+                m.size,
+            ].filter(Boolean).join(' ').toLowerCase().includes(q);
+        });
 
     const handleSaveNote = () => {
         if (!id) return;
@@ -522,8 +708,18 @@ export default function ProjectDetail() {
 
     const estimation = getEstimation();
     const isCompleted = project.status === 'completed';
-    const currentRowDisplay = project.current_row || 0;
-    const API_URL = 'http://192.168.1.96:3000';
+    const projectSteps = sanitizeProjectSteps(project.project_steps);
+    const hasProjectSteps = projectSteps.length > 0;
+    const activeStepIndex = hasProjectSteps
+        ? normalizeActiveStepIndex(project.active_step_index ?? 0, projectSteps)
+        : 0;
+    const activeProjectStep = hasProjectSteps ? projectSteps[activeStepIndex] : null;
+    const stepRowDisplay = hasProjectSteps ? (activeProjectStep?.current_rows || 0) : (project.current_row || 0);
+    const totalRowDisplay = hasProjectSteps ? getTotalRowsFromSteps(projectSteps) : (project.current_row || 0);
+    const activeStepTargetRows = typeof activeProjectStep?.target_rows === 'number' ? activeProjectStep.target_rows : null;
+    const activeStepRowsRemaining = hasProjectSteps
+        ? (activeStepTargetRows === null ? 0 : Math.max(0, activeStepTargetRows - (activeProjectStep?.current_rows || 0)))
+        : 0;
 
     return (
         <div className="h-[100dvh] w-screen bg-background text-white flex flex-col animate-fade-in overflow-hidden">
@@ -542,6 +738,14 @@ export default function ProjectDetail() {
                 </h1>
 
                 <div className="flex justify-end gap-1">
+                    <button
+                        type="button"
+                        onClick={openStepsManager}
+                        className="p-2 rounded-full bg-zinc-800 text-zinc-400 hover:text-white transition"
+                        title="Étapes"
+                    >
+                        <ListOrdered size={18} />
+                    </button>
                     {isCompleted ? (
                         <button onClick={() => setShowResumeConfirm(true)} className="p-2 rounded-full bg-zinc-800 text-amber-400 hover:text-amber-300 transition">
                             <RotateCcw size={18} />
@@ -565,10 +769,52 @@ export default function ProjectDetail() {
                         <Timer
                             elapsed={elapsed}
                             isActive={isActive}
-                            onToggle={handleToggleTimer}
+                            onToggle={handleToggleTimerFromUI}
                             onReset={handleResetTimer}
                         />
                     </div>
+                    {hasProjectSteps && activeProjectStep && (
+                        <div className="mt-1 flex flex-col items-center gap-1 px-4">
+                            <div className="flex items-center justify-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setActiveProjectStepIndex(activeStepIndex - 1)}
+                                    disabled={activeStepIndex <= 0}
+                                    className="w-9 h-9 rounded-full bg-zinc-800 text-zinc-400 disabled:opacity-40 flex items-center justify-center"
+                                    title="Étape précédente"
+                                >
+                                    <ChevronLeft size={18} />
+                                </button>
+
+                                <button
+                                    type="button"
+                                    onClick={openStepsManager}
+                                    className="px-3 py-2 rounded-xl bg-zinc-800/70 border border-zinc-700 text-center hover:bg-zinc-800 transition"
+                                >
+                                    <p className="text-[10px] uppercase tracking-wide text-primary font-semibold">
+                                        Étape {activeStepIndex + 1}/{projectSteps.length}
+                                    </p>
+                                    <p className="text-sm font-semibold text-white">{activeProjectStep.title}</p>
+                                </button>
+
+                                <button
+                                    type="button"
+                                    onClick={() => setActiveProjectStepIndex(activeStepIndex + 1)}
+                                    disabled={activeStepIndex >= projectSteps.length - 1}
+                                    className="w-9 h-9 rounded-full bg-zinc-800 text-zinc-400 disabled:opacity-40 flex items-center justify-center"
+                                    title="Étape suivante"
+                                >
+                                    <ChevronRight size={18} />
+                                </button>
+                            </div>
+
+                            {activeProjectStep.instruction && (
+                                <p className="text-xs text-zinc-300 text-center max-w-sm">
+                                    {activeProjectStep.instruction}
+                                </p>
+                            )}
+                        </div>
+                    )}
                     {estimation && (
                         <div className="inline-flex items-center gap-2 px-2 py-0.5 rounded-full bg-green-400/10 text-green-400 text-[10px] font-medium animate-fade-in border border-green-400/20 -mt-1">
                             <TrendingUp size={10} />
@@ -579,26 +825,48 @@ export default function ProjectDetail() {
 
                 <div className="flex-1 flex flex-col items-center justify-center min-h-0 relative">
                     <div className={`text-[20vh] font-bold leading-none tracking-tighter select-none flex items-center justify-center transition-colors ${isCompleted ? 'text-green-400' : ''}`}>
-                        {currentRowDisplay}
+                        {stepRowDisplay}
                     </div>
 
-                    <div className="flex flex-col items-center gap-1 mt-1">
-                        {!isCompleted && step > 1 && (
-                            <div className="bg-primary/20 text-primary text-[10px] px-2 py-0.5 rounded-full font-bold">
-                                Pas : +/- {step}
+	                <div className="flex flex-col items-center gap-2 mt-1 px-4">
+	                    {!isCompleted && incrementStep > 1 && (
+	                        <div className="bg-primary/20 text-primary text-[10px] px-2 py-0.5 rounded-full font-bold">
+	                            Pas : +/- {incrementStep}
+	                        </div>
+	                    )}
+
+                        {hasProjectSteps && activeProjectStep && (
+                            <div className="bg-zinc-800/70 border border-zinc-700 rounded-xl px-3 py-2 text-center max-w-xs">
+                                <p className="text-[11px] text-zinc-300">
+                                    {activeProjectStep.current_rows}
+                                    {activeStepTargetRows !== null ? `/${activeStepTargetRows}` : ''} rangs
+                                    {activeStepTargetRows !== null ? ` • reste ${activeStepRowsRemaining}` : ''}
+                                </p>
+                                <p className="text-[10px] text-zinc-500 mt-1">
+                                    Total: {totalRowDisplay}
+                                </p>
                             </div>
                         )}
 
-                        {project.goal_rows ? (
-                            <div onClick={() => setShowSettings(true)} className="text-zinc-500 flex items-center gap-2 cursor-pointer hover:text-zinc-300 transition px-2 py-1 rounded-lg hover:bg-zinc-800/50 text-xs">
-                                <span>sur {project.goal_rows} rangs</span>
-                                <span className="text-[10px]">✎</span>
-                            </div>
-                        ) : (
-                            <div className="h-5"></div>
-                        )}
-                    </div>
-                </div>
+	                    {project.goal_rows ? (
+	                        <div onClick={() => setShowSettings(true)} className="text-zinc-500 flex items-center gap-2 cursor-pointer hover:text-zinc-300 transition px-2 py-1 rounded-lg hover:bg-zinc-800/50 text-xs">
+	                            <span>sur {project.goal_rows} rangs</span>
+	                            <span className="text-[10px]">✎</span>
+	                        </div>
+	                    ) : (
+	                        <div className="h-5"></div>
+	                    )}
+
+	                    <button
+	                        type="button"
+	                        onClick={resetCounterToZero}
+	                        className="text-zinc-500 text-xs flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-zinc-800/50 hover:text-zinc-300 transition"
+	                    >
+	                        <RotateCcw size={14} />
+	                        <span>{isCompleted ? 'Reprendre et reset' : 'Reset à 0'}</span>
+	                    </button>
+	                </div>
+	            </div>
 
                 <div className={`shrink-0 flex items-center justify-center gap-8 py-3 bg-background transition-opacity ${isCompleted ? 'opacity-0 pointer-events-none' : ''}`}>
                     <button onClick={() => updateCounter(-1)} className="w-14 h-14 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 shadow-lg active:scale-90 transition-transform">
@@ -619,7 +887,7 @@ export default function ProjectDetail() {
                             <Camera size={16} />
                             <span className="text-[9px]">Photos</span>
                         </button>
-                        <button onClick={() => setShowMaterials(true)} className="flex flex-col items-center justify-center gap-0.5 bg-zinc-800/50 border border-zinc-700/50 rounded-xl text-zinc-400 hover:bg-zinc-800 hover:text-white transition h-12 relative">
+                        <button onClick={openMaterials} className="flex flex-col items-center justify-center gap-0.5 bg-zinc-800/50 border border-zinc-700/50 rounded-xl text-zinc-400 hover:bg-zinc-800 hover:text-white transition h-12 relative">
                             <Package size={16} />
                             <span className="text-[9px]">Matériaux</span>
                             {projectMaterials.length > 0 && (
@@ -633,21 +901,204 @@ export default function ProjectDetail() {
             </div>
 
             {/* MODALS */}
+            <Modal isOpen={showStepsManager} onClose={() => setShowStepsManager(false)} title="Étapes">
+                <div className="space-y-4">
+                    {tempProjectSteps.length === 0 ? (
+                        <p className="text-sm text-zinc-400">
+                            Crée des étapes pour avoir un compteur par section (ex: Côtes, Corps, Manches).
+                        </p>
+                    ) : (
+                        <div className="space-y-3">
+                                    {tempProjectSteps.map((stepItem, index) => (
+                                <div
+                                    key={stepItem.id}
+                                    className={`rounded-xl border p-3 ${
+                                        index === activeStepIndex
+                                            ? 'border-primary bg-primary/10'
+                                            : 'border-zinc-700 bg-zinc-900/50'
+                                    }`}
+                                >
+                                    <div className="flex items-center justify-between gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                if (!id) return;
+                                                updateProjectMutation.mutate({
+                                                    id,
+                                                    active_step_index: index,
+                                                });
+                                            }}
+                                            className="text-left"
+                                        >
+                                            <p className="text-white font-semibold">{stepItem.title}</p>
+                                            <p className="text-xs text-zinc-400 mt-1">
+                                                {stepItem.current_rows}
+                                                {typeof stepItem.target_rows === 'number' ? `/${stepItem.target_rows}` : ''} rangs
+                                            </p>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => removeProjectStep(index)}
+                                            className="text-xs text-red-400 hover:text-red-300"
+                                        >
+                                            Retirer
+                                        </button>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-2 mt-3">
+                                        <Input
+                                            value={stepItem.title}
+                                            onChange={(event) => updateProjectStep(index, { title: event.target.value })}
+                                            placeholder="Nom"
+                                        />
+                                        <Input
+                                            type="number"
+                                            value={stepItem.target_rows ?? ''}
+                                            onChange={(event) => {
+                                                const raw = event.target.value.trim();
+                                                if (!raw) {
+                                                    updateProjectStep(index, { target_rows: null });
+                                                    return;
+                                                }
+                                                const value = parseInt(raw, 10);
+                                                if (Number.isNaN(value) || value <= 0) return;
+                                                updateProjectStep(index, { target_rows: value });
+                                            }}
+                                            placeholder="Objectif (optionnel)"
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2 mt-2">
+                                        <Input
+                                            type="number"
+                                            min={0}
+                                            value={stepItem.current_rows}
+                                            onChange={(event) => {
+                                                const value = parseInt(event.target.value, 10);
+                                                if (Number.isNaN(value)) return;
+                                                updateProjectStep(index, { current_rows: Math.max(0, value) });
+                                            }}
+                                            placeholder="Compteur"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => updateProjectStep(index, { current_rows: 0 })}
+                                            className="rounded-xl border border-zinc-700 bg-zinc-800 text-zinc-300 font-semibold"
+                                        >
+                                            Reset
+                                        </button>
+                                    </div>
+                                    <textarea
+                                        value={stepItem.instruction || ''}
+                                        onChange={(event) => updateProjectStep(index, { instruction: event.target.value })}
+                                        placeholder="Mémo"
+                                        className="w-full min-h-20 bg-zinc-800/60 text-white p-3 rounded-lg border border-zinc-700 resize-none text-sm mt-2"
+                                    />
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    <div className="rounded-xl border border-dashed border-zinc-700 p-3 space-y-2">
+                        <Input
+                            value={newStepTitle}
+                            onChange={(event) => setNewStepTitle(event.target.value)}
+                            placeholder="Nouvelle étape"
+                        />
+                        <Input
+                            type="number"
+                            value={newStepTargetRows}
+                            onChange={(event) => setNewStepTargetRows(event.target.value)}
+                            placeholder="Objectif rangs (optionnel)"
+                        />
+                        <textarea
+                            value={newStepInstruction}
+                            onChange={(event) => setNewStepInstruction(event.target.value)}
+                            placeholder="Instruction optionnelle"
+                            className="w-full min-h-20 bg-zinc-800/60 text-white p-3 rounded-lg border border-zinc-700 resize-none text-sm"
+                        />
+                        <Button type="button" variant="secondary" onClick={addProjectStep}>
+                            Ajouter l'étape
+                        </Button>
+                    </div>
+
+                    <Button
+                        type="button"
+                        onClick={() => {
+                            if (!id || !project) return;
+                            const normalizedSteps = sanitizeProjectSteps(tempProjectSteps);
+                            const computedTotalRows = normalizedSteps.length > 0 ? getTotalRowsFromSteps(normalizedSteps) : (project.current_row || 0);
+                            const nextActive = normalizedSteps.length > 0
+                                ? Math.min(activeStepIndex, normalizedSteps.length - 1)
+                                : 0;
+                            updateProjectMutation.mutate({
+                                id,
+                                project_steps: normalizedSteps,
+                                active_step_index: nextActive,
+                                current_row: computedTotalRows,
+                            });
+                            setShowStepsManager(false);
+                            setToastMessage('Étapes mises à jour');
+                        }}
+                    >
+                        Enregistrer les étapes
+                    </Button>
+                </div>
+            </Modal>
+
             <Modal isOpen={showSettings} onClose={() => setShowSettings(false)} title="Réglages du projet">
                 <div className="space-y-6">
+                    <input
+                        type="file"
+                        ref={coverInputRef}
+                        onChange={handleCoverFileSelect}
+                        accept="image/*"
+                        className="hidden"
+                    />
+
                     <Input label="Nom du projet" value={tempTitle} onChange={(e) => setTempTitle(e.target.value)} />
 
                     <div className="space-y-2">
                         <label className="text-xs text-zinc-400 ml-1">Pas d'incrémentation</label>
                         <div className="flex gap-2">
                             {[1, 2, 5, 10].map((val) => (
-                                <button key={val} onClick={() => setStep(val)} className={`flex-1 py-3 rounded-xl font-bold transition-all ${step === val ? 'bg-primary text-background' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}>{val}</button>
+                                <button key={val} onClick={() => setIncrementStep(val)} className={`flex-1 py-3 rounded-xl font-bold transition-all ${incrementStep === val ? 'bg-primary text-background' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}`}>{val}</button>
                             ))}
                         </div>
                     </div>
 
                     <Input label="Objectif de rangs" type="number" value={tempGoal} onChange={(e) => setTempGoal(e.target.value)} placeholder="Infini" />
                     <Input label="Temps écoulé (HH:MM:SS)" value={tempTimer} onChange={(e) => setTempTimer(e.target.value)} placeholder="00:00:00" />
+
+                    <div className="space-y-3">
+                        <label className="text-xs text-zinc-400 ml-1">Photo de couverture</label>
+                        <div className="rounded-xl border border-zinc-700 bg-zinc-800/40 p-3">
+                            <div className="w-full aspect-[16/9] rounded-lg overflow-hidden bg-zinc-900 mb-3">
+                                <img
+                                    src={coverPreview || '/logo-mini.svg'}
+                                    alt="Couverture du projet"
+                                    className="w-full h-full object-cover"
+                                    onError={(event) => {
+                                        event.currentTarget.src = '/logo-mini.svg';
+                                    }}
+                                />
+                            </div>
+                            <div className="flex gap-2">
+                                <Button variant="secondary" onClick={() => coverInputRef.current?.click()} className="flex-1">
+                                    Changer la couverture
+                                </Button>
+                                <button
+                                    type="button"
+                                    onClick={handleRemoveCover}
+                                    className="px-4 rounded-xl bg-red-500/10 text-red-400 hover:bg-red-500/20 transition"
+                                >
+                                    Retirer
+                                </button>
+                            </div>
+                            <p className="text-[11px] text-zinc-500 mt-2">
+                                Par défaut, le logo de l&apos;app est affiché.
+                            </p>
+                        </div>
+                    </div>
 
                     <div className="pt-4 space-y-3">
                         <Button onClick={handleSaveSettings}>Enregistrer</Button>
@@ -734,7 +1185,7 @@ export default function ProjectDetail() {
                 <div className="grid grid-cols-2 gap-3 max-h-[40vh] overflow-y-auto pr-1 scrollbar-hide select-none">
                     {photos.map((photo: Photo, index: number) => {
                         const isSelected = selectedPhotoIds.has(photo.id);
-                        const imgSrc = photo._isLocal && photo.base64 ? photo.base64 : `${API_URL}${photo.file_path}`;
+                        const imgSrc = photo._isLocal && photo.base64 ? photo.base64 : resolveServerFilePath(photo.file_path);
                         return (
                             <div
                                 key={photo.id}
@@ -766,7 +1217,7 @@ export default function ProjectDetail() {
                     <div className="flex-1 flex items-center justify-center relative overflow-hidden">
                         <div className="absolute inset-y-0 left-0 w-1/4 z-10" onClick={prevPhoto} />
                         <img
-                            src={photos[selectedPhotoIndex]._isLocal && photos[selectedPhotoIndex].base64 ? photos[selectedPhotoIndex].base64 : `${API_URL}${photos[selectedPhotoIndex].file_path}`}
+                            src={photos[selectedPhotoIndex]._isLocal && photos[selectedPhotoIndex].base64 ? photos[selectedPhotoIndex].base64 : resolveServerFilePath(photos[selectedPhotoIndex].file_path)}
                             alt="Galerie"
                             className="max-w-full max-h-full object-contain"
                         />
@@ -798,37 +1249,187 @@ export default function ProjectDetail() {
                 </div>
             </Modal>
 
-            <Modal isOpen={showMaterials} onClose={() => setShowMaterials(false)} title="Matériaux">
+            <Modal
+                isOpen={showMaterials}
+                onClose={() => {
+                    setShowMaterials(false);
+                    setMaterialsMode('view');
+                    setTempMaterialIds(selectedMaterialIds);
+                    setMaterialsFilter('all');
+                    setMaterialsSearch('');
+                }}
+                title="Matériaux"
+            >
                 <div className="space-y-4">
-                    {allMaterials.length === 0 ? (
-                        <div className="text-center py-8 text-zinc-500">
-                            <Package size={48} className="mx-auto mb-3 opacity-50" />
-                            <p>Aucun matériel dans l'inventaire</p>
-                            <p className="text-xs mt-1">Ajoutez des matériaux depuis l'inventaire</p>
-                        </div>
+                    {materialsMode === 'view' ? (
+                        <>
+                            {projectMaterials.length === 0 ? (
+                                <div className="text-center py-8 text-zinc-500">
+                                    <Package size={48} className="mx-auto mb-3 opacity-50" />
+                                    <p>Aucun matériel associé à ce projet</p>
+                                    <p className="text-xs mt-1">Ajoutez-en depuis votre inventaire</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    {projectMaterials.map((mat) => (
+                                        <div
+                                            key={mat.id}
+                                            className="p-3 rounded-xl bg-zinc-900/40 border border-zinc-800 flex items-start justify-between gap-3"
+                                        >
+                                            <div className="flex items-start gap-3">
+                                                <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-xl shrink-0">
+                                                    {getIcon(mat.category_type)}
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <p className="text-white font-semibold truncate">{mat.name}</p>
+                                                    <p className="text-xs text-zinc-400 mt-0.5">
+                                                        {[
+                                                            mat.size ? `${mat.size}mm` : undefined,
+                                                            mat.brand,
+                                                            mat.material_composition,
+                                                            mat.color_number ? `couleur ${mat.color_number}` : undefined,
+                                                            typeof mat.yardage_meters === 'number' ? `${mat.yardage_meters}m` : undefined,
+                                                            typeof mat.grammage_grams === 'number' ? `${mat.grammage_grams}g` : undefined,
+                                                        ].filter(Boolean).join(' - ') || '—'}
+                                                    </p>
+                                                    {mat.description && (
+                                                        <p className="text-[11px] text-zinc-500 mt-1 whitespace-pre-wrap">
+                                                            {mat.description}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            <div className="flex gap-3 pt-2">
+                                <Button
+                                    variant="secondary"
+                                    onClick={() => setShowMaterials(false)}
+                                    className="flex-1"
+                                >
+                                    Fermer
+                                </Button>
+                                <Button
+                                    onClick={() => {
+                                        setTempMaterialIds(selectedMaterialIds);
+                                        setMaterialsMode('manage');
+                                    }}
+                                    className="flex-1"
+                                >
+                                    Gérer
+                                </Button>
+                            </div>
+                        </>
                     ) : (
                         <>
-                            <p className="text-xs text-zinc-400">Sélectionnez les matériaux utilisés pour ce projet</p>
-                            <div className="flex flex-wrap gap-2 max-h-[40vh] overflow-y-auto">
-                                {allMaterials.map((mat) => (
-                                    <button
-                                        key={mat.id}
-                                        type="button"
-                                        onClick={() => toggleMaterial(mat.id)}
-                                        className={`px-3 py-2 rounded-xl text-sm font-medium border transition-all flex items-center gap-2 ${
-                                            selectedMaterialIds.includes(mat.id)
-                                                ? "bg-secondary border-primary text-white shadow-[0_0_10px_-3px_rgba(196,181,254,0.5)]"
-                                                : "bg-zinc-800/50 border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:bg-zinc-800"
-                                        }`}
-                                    >
-                                        <span>{getIcon(mat.category_type)}</span>
-                                        <span>{mat.name}</span>
-                                    </button>
-                                ))}
+                            {allMaterials.length === 0 ? (
+                                <div className="text-center py-8 text-zinc-500">
+                                    <Package size={48} className="mx-auto mb-3 opacity-50" />
+                                    <p>Aucun matériel dans l'inventaire</p>
+                                    <p className="text-xs mt-1">Ajoutez des matériaux depuis l'inventaire</p>
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="text"
+                                            value={materialsSearch}
+                                            onChange={(e) => setMaterialsSearch(e.target.value)}
+                                            placeholder="Rechercher..."
+                                            className="flex-1 p-3 rounded-xl bg-zinc-800/60 border border-zinc-700 text-white placeholder-zinc-500 focus:outline-none focus:border-primary"
+                                        />
+                                    </div>
+
+                                    <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+                                        {[
+                                            { id: 'all' as const, label: 'Tout' },
+                                            { id: 'hook' as const, label: 'Crochets' },
+                                            { id: 'yarn' as const, label: 'Laine' },
+                                            { id: 'needle' as const, label: 'Aiguilles' },
+                                        ].map(tab => (
+                                            <button
+                                                key={tab.id}
+                                                type="button"
+                                                onClick={() => setMaterialsFilter(tab.id)}
+                                                className={`px-3 py-2 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${
+                                                    materialsFilter === tab.id
+                                                        ? 'bg-primary text-background shadow-lg shadow-primary/20'
+                                                        : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+                                                }`}
+                                            >
+                                                {tab.label}
+                                            </button>
+                                        ))}
+                                    </div>
+
+                                    <p className="text-xs text-zinc-400">
+                                        Ajoutez/supprimez les matériaux du projet
+                                    </p>
+
+                                    <div className="flex flex-col gap-2 max-h-[45vh] overflow-y-auto pr-1 scrollbar-hide">
+                                        {filteredAllMaterials.map((mat) => {
+                                            const isSelected = tempMaterialIds.includes(mat.id);
+                                            return (
+                                                <button
+                                                    key={mat.id}
+                                                    type="button"
+                                                    onClick={() => toggleTempMaterial(mat.id)}
+                                                    className={`p-3 rounded-xl border transition-all flex items-start justify-between gap-3 text-left ${
+                                                        isSelected
+                                                            ? 'bg-secondary border-primary text-white shadow-[0_0_10px_-3px_rgba(196,181,254,0.5)]'
+                                                            : 'bg-zinc-900/30 border-zinc-800 text-zinc-300 hover:border-zinc-600'
+                                                    }`}
+                                                >
+                                                    <div className="flex items-start gap-3 min-w-0">
+                                                        <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-xl shrink-0">
+                                                            {getIcon(mat.category_type)}
+                                                        </div>
+                                                        <div className="min-w-0">
+                                                            <p className="font-semibold truncate">{mat.name}</p>
+                                                            <p className="text-xs text-zinc-400 mt-0.5">
+                                                                {[
+                                                                    mat.size ? `${mat.size}mm` : undefined,
+                                                                    mat.brand,
+                                                                    mat.material_composition,
+                                                                    mat.color_number ? `couleur ${mat.color_number}` : undefined,
+                                                                    typeof mat.yardage_meters === 'number' ? `${mat.yardage_meters}m` : undefined,
+                                                                    typeof mat.grammage_grams === 'number' ? `${mat.grammage_grams}g` : undefined,
+                                                                ].filter(Boolean).join(' - ') || '—'}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <div className={`w-6 h-6 rounded-full border flex items-center justify-center shrink-0 mt-1 ${
+                                                        isSelected ? 'bg-primary border-primary text-background' : 'border-zinc-600 text-transparent'
+                                                    }`}>
+                                                        <Check size={14} strokeWidth={3} />
+                                                    </div>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </>
+                            )}
+
+                            <div className="flex gap-3 pt-2">
+                                <Button
+                                    variant="secondary"
+                                    onClick={() => {
+                                        setMaterialsMode('view');
+                                        setTempMaterialIds(selectedMaterialIds);
+                                        setMaterialsFilter('all');
+                                        setMaterialsSearch('');
+                                    }}
+                                    className="flex-1"
+                                >
+                                    Retour
+                                </Button>
+                                <Button onClick={handleSaveMaterials} className="flex-1">
+                                    Enregistrer
+                                </Button>
                             </div>
-                            <Button onClick={handleSaveMaterials} className="w-full mt-4">
-                                Enregistrer
-                            </Button>
                         </>
                     )}
                 </div>

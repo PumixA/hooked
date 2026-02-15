@@ -10,8 +10,13 @@ interface Material {
     id: string;
     category_type: 'hook' | 'yarn' | 'needle';
     name: string;
+    size?: string;
     brand?: string;
     material_composition?: string;
+    description?: string;
+    color_number?: string;
+    yardage_meters?: number;
+    grammage_grams?: number;
     _syncStatus?: string;
 }
 
@@ -144,14 +149,32 @@ export default function Inventory() {
                                 </div>
                                 <div>
                                     <div className="flex items-center gap-2">
-                                        <h3 className="font-bold text-white">{item.name}</h3>
+                                        <h3 className="font-bold text-white">
+                                            {item.name}
+                                            {item.size ? (
+                                                <span className="text-xs text-zinc-400 font-medium ml-2">
+                                                    {item.size}mm
+                                                </span>
+                                            ) : null}
+                                        </h3>
                                         <span className={`text-[10px] px-2 py-0.5 rounded-full uppercase tracking-wider font-bold ${getCategoryColor(item.category_type)}`}>
                                             {getCategoryLabel(item.category_type)}
                                         </span>
                                     </div>
                                     <p className="text-xs text-zinc-400">
-                                        {[item.brand, item.material_composition].filter(Boolean).join(' - ')}
+                                        {[
+                                            item.brand,
+                                            item.material_composition,
+                                            item.color_number ? `couleur ${item.color_number}` : undefined,
+                                            typeof item.yardage_meters === 'number' ? `${item.yardage_meters}m` : undefined,
+                                            typeof item.grammage_grams === 'number' ? `${item.grammage_grams}g` : undefined,
+                                        ].filter(Boolean).join(' - ')}
                                     </p>
+                                    {item.description && (
+                                        <p className="text-[11px] text-zinc-500 mt-1 line-clamp-2">
+                                            {item.description}
+                                        </p>
+                                    )}
                                 </div>
                             </div>
                             <button

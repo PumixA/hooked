@@ -24,7 +24,7 @@ declare global {
 
 export interface SyncResult {
     success: boolean;
-    pushed: { projects: number; materials: number; sessions: number; photos: number; deletions: number };
+    pushed: { projects: number; materials: number; sessions: number; photos: number; covers: number; deletions: number };
     pulled: { projects: number; materials: number; categories: number };
     errors: string[];
     skipped?: boolean;
@@ -43,6 +43,26 @@ function isLocalId(id: string): boolean {
 function isValidUuid(id: string): boolean {
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     return uuidRegex.test(id);
+}
+
+function base64ToBlob(base64Data: string): Blob | null {
+    try {
+        const commaIndex = base64Data.indexOf(',');
+        const metadata = commaIndex > -1 ? base64Data.slice(0, commaIndex) : '';
+        const rawData = commaIndex > -1 ? base64Data.slice(commaIndex + 1) : base64Data;
+        const mimeMatch = metadata.match(/data:(.*?);base64/);
+        const mimeType = mimeMatch?.[1] || 'image/jpeg';
+        const binary = atob(rawData);
+        const bytes = new Uint8Array(binary.length);
+
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+
+        return new Blob([bytes], { type: mimeType });
+    } catch {
+        return null;
+    }
 }
 
 // Fonction pour verifier si la sync est activee
@@ -86,7 +106,7 @@ class SyncService {
             console.log('[Sync] Sync desactivee (pas de compte ou sync off)');
             return {
                 success: true,
-                pushed: { projects: 0, materials: 0, sessions: 0, photos: 0, deletions: 0 },
+                pushed: { projects: 0, materials: 0, sessions: 0, photos: 0, covers: 0, deletions: 0 },
                 pulled: { projects: 0, materials: 0, categories: 0 },
                 errors: [],
                 skipped: true,
@@ -97,7 +117,7 @@ class SyncService {
         if (this.isSyncing) {
             return {
                 success: false,
-                pushed: { projects: 0, materials: 0, sessions: 0, photos: 0, deletions: 0 },
+                pushed: { projects: 0, materials: 0, sessions: 0, photos: 0, covers: 0, deletions: 0 },
                 pulled: { projects: 0, materials: 0, categories: 0 },
                 errors: ['Deja en cours'],
                 skipped: true
@@ -107,7 +127,7 @@ class SyncService {
         if (!navigator.onLine) {
             return {
                 success: false,
-                pushed: { projects: 0, materials: 0, sessions: 0, photos: 0, deletions: 0 },
+                pushed: { projects: 0, materials: 0, sessions: 0, photos: 0, covers: 0, deletions: 0 },
                 pulled: { projects: 0, materials: 0, categories: 0 },
                 errors: ['Hors ligne'],
                 skipped: true,
@@ -120,7 +140,7 @@ class SyncService {
 
         const result: SyncResult = {
             success: true,
-            pushed: { projects: 0, materials: 0, sessions: 0, photos: 0, deletions: 0 },
+            pushed: { projects: 0, materials: 0, sessions: 0, photos: 0, covers: 0, deletions: 0 },
             pulled: { projects: 0, materials: 0, categories: 0 },
             errors: []
         };
@@ -153,10 +173,13 @@ class SyncService {
             // 6. PUSH: Photos (avec les nouveaux project_id)
             await this.pushPhotos(result, projectIdMap);
 
-            // 7. PULL: Recuperer les donnees depuis l'API
+            // 7. PUSH: Couvertures projets (après migration des IDs)
+            await this.pushProjectCovers(result, projectIdMap);
+
+            // 8. PULL: Recuperer les donnees depuis l'API
             await this.pullData(result);
 
-            // 8. Mettre a jour le timestamp de derniere sync
+            // 9. Mettre a jour le timestamp de derniere sync
             await localDb.setLastSyncTime(Date.now());
 
             this.notifyStatus('Synchronisation terminee');
@@ -190,6 +213,13 @@ class SyncService {
                         total_duration: project.total_duration || 0,
                         status: project.status || 'in_progress',
                     };
+
+                    if (project.project_steps !== undefined) {
+                        createData.project_steps = project.project_steps;
+                    }
+                    if (project.active_step_index !== undefined) {
+                        createData.active_step_index = project.active_step_index;
+                    }
 
                     // Convertir category_id local en UUID si necessaire
                     if (project.category_id) {
@@ -240,6 +270,12 @@ class SyncService {
                         // Envoyer end_date: null si undefined pour permettre de reprendre un projet
                         end_date: project.end_date || null,
                     };
+                    if (project.project_steps !== undefined) {
+                        updateData.project_steps = project.project_steps;
+                    }
+                    if (project.active_step_index !== undefined) {
+                        updateData.active_step_index = project.active_step_index;
+                    }
                     // Convertir les material_ids locaux en UUIDs serveur
                     if (project.material_ids && project.material_ids.length > 0) {
                         const convertedMaterialIds: string[] = [];
@@ -269,6 +305,62 @@ class SyncService {
         }
     }
 
+    // === PUSH PROJECT COVERS ===
+    private async pushProjectCovers(result: SyncResult, projectIdMap: IdMigrationMap): Promise<void> {
+        const allProjects = await localDb.getAllProjects();
+        const pendingCovers = allProjects.filter(project => project.cover_sync_status === 'pending');
+
+        for (const project of pendingCovers) {
+            try {
+                const mappedProjectId = projectIdMap.get(project.id) || project.id;
+                if (!isValidUuid(mappedProjectId)) {
+                    continue;
+                }
+
+                // Si aucune base64, cela signifie que la couverture doit être supprimée.
+                if (!project.cover_base64) {
+                    await api.delete(`/projects/${mappedProjectId}/cover`);
+                    await localDb.saveProject({
+                        id: mappedProjectId,
+                        cover_file_path: undefined,
+                        cover_base64: undefined,
+                        cover_sync_status: 'synced',
+                        _syncStatus: project._syncStatus,
+                        _isLocal: project._isLocal,
+                    });
+                    result.pushed.covers++;
+                    continue;
+                }
+
+                const coverBlob = base64ToBlob(project.cover_base64);
+                if (!coverBlob) {
+                    result.errors.push(`Couverture ${project.title}: format invalide`);
+                    continue;
+                }
+
+                const formData = new FormData();
+                formData.append('file', coverBlob, `cover-${mappedProjectId}.jpg`);
+
+                const response = await api.post(`/projects/${mappedProjectId}/cover`, formData, {
+                    headers: { 'Content-Type': 'multipart/form-data' }
+                });
+
+                await localDb.saveProject({
+                    id: mappedProjectId,
+                    cover_file_path: response.data?.cover_file_path,
+                    cover_sync_status: 'synced',
+                    _syncStatus: project._syncStatus,
+                    _isLocal: false,
+                });
+
+                result.pushed.covers++;
+            } catch (error: unknown) {
+                const errorMsg = isAxiosError(error) ? (error.response?.data?.message || error.message) : (error instanceof Error ? error.message : 'Unknown error');
+                result.errors.push(`Couverture ${project.title}: ${errorMsg}`);
+            }
+        }
+    }
+
     // === PUSH MATERIALS ===
     private async pushMaterials(result: SyncResult, idMap: IdMigrationMap): Promise<void> {
         const pendingMaterials = await localDb.getPendingMaterials();
@@ -282,6 +374,10 @@ class SyncService {
                         size: material.size,
                         brand: material.brand,
                         material_composition: material.material_composition,
+                        description: material.description,
+                        color_number: material.color_number,
+                        yardage_meters: material.yardage_meters,
+                        grammage_grams: material.grammage_grams,
                     };
                     const response = await api.post('/materials', createData);
                     const serverId = response.data.id;
@@ -299,6 +395,10 @@ class SyncService {
                         size: material.size,
                         brand: material.brand,
                         material_composition: material.material_composition,
+                        description: material.description,
+                        color_number: material.color_number,
+                        yardage_meters: material.yardage_meters,
+                        grammage_grams: material.grammage_grams,
                     };
                     await api.patch(`/materials/${material.id}`, updateData);
                     await localDb.markMaterialSynced(material.id);
@@ -612,6 +712,11 @@ class SyncService {
             status: projectData.status || 'in_progress',
             category_id: projectData.category_id,
             material_ids: projectData.material_ids,
+            cover_file_path: projectData.cover_file_path,
+            cover_base64: projectData.cover_base64,
+            cover_sync_status: projectData.cover_sync_status,
+            project_steps: projectData.project_steps,
+            active_step_index: projectData.active_step_index,
             created_at: projectData.created_at,
             end_date: projectData.end_date,
             _syncStatus: 'synced',

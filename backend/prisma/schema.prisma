@@ -22,6 +22,10 @@ model materials {
   size                 String?             @db.VarChar(20)
   brand                String?             @db.VarChar(100)
   material_composition String?             @db.VarChar(100)
+  description          String?             @db.Text
+  color_number         String?             @db.VarChar(60)
+  yardage_meters       Int?
+  grammage_grams       Int?
   updated_at           DateTime?           @default(now()) @db.Timestamptz(6)
   users                users?              @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   project_materials    project_materials[]
@@ -63,6 +67,9 @@ model projects {
   goal_rows      Int?
   increment_step Int?      @default(1)
   total_duration Int?      @default(0)
+  cover_file_path String?  @db.VarChar(255)
+  project_steps   Json?
+  active_step_index Int?   @default(0)
   start_date     DateTime? @default(now()) @db.Timestamptz(6)
   end_date       DateTime? @db.Timestamptz(6)
   created_at     DateTime? @default(now()) @db.Timestamptz(6)

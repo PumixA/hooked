@@ -12,8 +12,31 @@
 
 <!-- Entries below this line. Group by date. Most recent date on top. -->
 
+## 2026-02-15
+
+- [2026-02-15 23:07] codex | chore(git): prepare commit for material details and counter reset
+- [2026-02-15 23:06] codex | docs(spec): document material details and counter reset behavior
+- [2026-02-15 23:03] codex | feat(projects): add reset-to-zero button on project counter screen
+- [2026-02-15 22:59] codex | fix(inventory): add free-text material description field (offline-first + sync)
+- [2026-02-15 22:49] codex | fix(inventory): show size in titles and replace descriptif fields (color/yardage/grammage)
+- [2026-02-15 22:32] codex | feat(inventory): add material descriptifs and project-level manage menu for add/remove
+- [2026-02-15 22:12] codex | fix(docker): generate prisma client before typescript build in backend image
+- [2026-02-15 21:59] codex | feat(projects): allow steps without target rows and add in-page step switching + description display
+- [2026-02-15 21:46] codex | feat(projects): move step management into counter screen and give each step its own counter
+- [2026-02-15 21:37] codex | feat(projects): add step-by-step project flow with per-step targets and instruction memo (offline-first + sync)
+- [2026-02-15 21:21] codex | fix(pwa): keep lockscreen counter alive with service worker active state and robust app-open handling
+- [2026-02-15 21:11] codex | fix(pwa): trigger lockscreen counter notification from user gesture with dual path (direct + service worker mirror)
+
 ## 2026-02-13
 
+- [2026-02-13 20:36] codex | fix(pwa): make lockscreen counter notification persistent with periodic refresh and safer lifecycle handling
+- [2026-02-13 20:26] codex | fix(ui): restore page scrolling, fix project cover fallback, preprod badge, and live +/- lockscreen counter actions
+- [2026-02-13 20:04] codex | chore(git): commit v2.1 stability, cover sync, and notification foundation changes on fix/android-timer-dashboard-stability
+- [2026-02-13 19:24] codex | fix(ui): remove dashboard row counters, reduce residual scroll, and re-enable login entry in settings
+- [2026-02-13 18:59] codex | fix(pwa): switch to hash routing and stabilize android reload + timer runtime persistence
+- [2026-02-13 18:59] codex | feat(projects): add project cover upload/remove with offline-first sync support
+- [2026-02-13 18:59] codex | feat(pwa): add lockscreen notification action foundation via service worker messaging
+- [2026-02-13 18:59] codex | docs(docs): update requirements/design/features/decisions for v2.1 stability and cover flow
 - [2026-02-13 11:40] claude-code | chore(git): clean up ~30 obsolete branches (feature/hook-*, fixes, temporaryProd, develop)
 - [2026-02-13 11:40] human | chore(git): configure branch protection rules on GitHub (main: PR + 1 approval + CI, dev: PR + CI)
 - [2026-02-13 11:20] claude-code | docs(agent): update all .agent/ docs with preprod environment, DNS, network config
