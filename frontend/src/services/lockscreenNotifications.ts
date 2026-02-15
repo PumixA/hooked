@@ -25,6 +25,7 @@ export async function showProjectCounterNotification(payload: ProjectCounterNoti
     body: payload.projectTitle,
     tag: `hooked-project-${payload.projectId}`,
     requireInteraction: true,
+    data: { projectId: payload.projectId },
     actions: [
       { action: 'increment-row', title: '+' },
       { action: 'decrement-row', title: '-' },
@@ -34,6 +35,12 @@ export async function showProjectCounterNotification(payload: ProjectCounterNoti
   } as NotificationOptions;
 
   await registration.showNotification(`Rang ${payload.currentRow}`, options);
+
+  // Fallback: mirror through SW message so Android/Chrome has a second path.
+  registration.active?.postMessage({
+    type: 'SHOW_LOCKSCREEN_COUNTER',
+    payload,
+  });
 }
 
 export async function clearProjectCounterNotification(projectId: string): Promise<void> {

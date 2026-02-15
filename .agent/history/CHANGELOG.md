@@ -12,6 +12,10 @@
 
 <!-- Entries below this line. Group by date. Most recent date on top. -->
 
+## 2026-02-15
+
+- [2026-02-15 21:11] codex | fix(pwa): trigger lockscreen counter notification from user gesture with dual path (direct + service worker mirror)
+
 ## 2026-02-13
 
 - [2026-02-13 20:36] codex | fix(pwa): make lockscreen counter notification persistent with periodic refresh and safer lifecycle handling

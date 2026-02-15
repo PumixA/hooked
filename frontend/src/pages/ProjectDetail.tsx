@@ -290,17 +290,32 @@ export default function ProjectDetail() {
         updateProjectMutation.mutate(updates);
     }, [id, project, queryClient, step, updateProjectMutation]);
 
-    useEffect(() => {
+    const handleToggleTimerFromUI = useCallback(async () => {
+        if (!id || !project || project.status === 'completed') return;
+
         if (!isActive) {
-            notificationPermissionRequestedRef.current = false;
-            return;
+            if (!notificationPermissionRequestedRef.current) {
+                notificationPermissionRequestedRef.current = true;
+                const permission = await requestNotificationPermission().catch(() => 'denied' as NotificationPermission);
+                if (permission !== 'granted') {
+                    handleToggleTimer();
+                    return;
+                }
+            }
+
+            notificationWasActiveRef.current = true;
+            showProjectCounterNotification({
+                projectId: id,
+                projectTitle: project.title,
+                currentRow: project.current_row || 0,
+            }).catch(console.error);
+        } else {
+            notificationWasActiveRef.current = false;
+            clearProjectCounterNotification(id).catch(console.error);
         }
 
-        if (notificationPermissionRequestedRef.current) return;
-
-        notificationPermissionRequestedRef.current = true;
-        requestNotificationPermission().catch(console.error);
-    }, [isActive]);
+        handleToggleTimer();
+    }, [handleToggleTimer, id, isActive, project]);
 
     useEffect(() => {
         if (!id || !project) return;
@@ -397,7 +412,9 @@ export default function ProjectDetail() {
     const handleFinishProject = () => {
         if (!project || !id) return;
 
-        if (isActive) handleToggleTimer();
+        if (isActive) {
+            handleToggleTimerFromUI().catch(console.error);
+        }
 
         updateProjectMutation.mutate({
             id,
@@ -558,7 +575,7 @@ export default function ProjectDetail() {
                         <Timer
                             elapsed={elapsed}
                             isActive={isActive}
-                            onToggle={handleToggleTimer}
+                            onToggle={handleToggleTimerFromUI}
                             onReset={handleResetTimer}
                         />
                     </div>
