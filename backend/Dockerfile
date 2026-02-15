@@ -5,10 +5,10 @@ COPY package*.json ./
 # Installation propre (ci)
 RUN npm ci
 COPY . .
-# Compilation TypeScript -> JavaScript
-RUN npm run build
 # Génération du client Prisma
 RUN npx prisma generate
+# Compilation TypeScript -> JavaScript
+RUN npm run build
 
 # Production stage
 FROM node:20-alpine
