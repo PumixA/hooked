@@ -34,7 +34,14 @@ export async function showProjectCounterNotification(payload: ProjectCounterNoti
     badge: '/logo-mini.svg',
   } as NotificationOptions;
 
-  await registration.showNotification(`Rang ${payload.currentRow}`, options);
+  await registration.showNotification(`RANG ${payload.currentRow}`, {
+    ...options,
+    body: `${payload.projectTitle} • commandes rapides`,
+    actions: [
+      { action: 'increment-row', title: 'AJOUTER +1' },
+      { action: 'decrement-row', title: 'RETIRER -1' },
+    ],
+  } as NotificationOptions);
 
   // Fallback: mirror through SW message so Android/Chrome has a second path.
   registration.active?.postMessage({

@@ -14,6 +14,7 @@
 
 ## 2026-02-15
 
+- [2026-02-15 21:21] codex | fix(pwa): keep lockscreen counter alive with service worker active state and robust app-open handling
 - [2026-02-15 21:11] codex | fix(pwa): trigger lockscreen counter notification from user gesture with dual path (direct + service worker mirror)
 
 ## 2026-02-13
