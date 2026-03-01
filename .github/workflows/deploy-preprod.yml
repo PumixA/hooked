@@ -49,5 +49,5 @@ jobs:
           cd /opt/hooked
           git fetch origin dev
           git checkout dev
-          git pull origin dev
+          git reset --hard origin/dev
           docker compose -f docker-compose.preprod.yml up -d --build

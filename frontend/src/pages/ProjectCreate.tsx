@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, Check, Loader2 } from 'lucide-react';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
 import { useCreateProject, useCategories, useMaterials } from '../hooks/useOfflineData';
@@ -61,6 +61,25 @@ export default function ProjectCreate() {
             case 'yarn': return '🧶';
             case 'needle': return '🥢';
             default: return '📦';
+        }
+    };
+
+    const getMaterialDetails = (material: (typeof materials)[number]) => {
+        switch (material.category_type) {
+            case 'hook':
+                return material.size ? `${material.size}mm` : null;
+            case 'yarn': {
+                const details = [
+                    material.material_composition,
+                    material.color_number ? `couleur ${material.color_number}` : undefined,
+                ].filter(Boolean);
+
+                return details.length > 0 ? details.join(' - ') : null;
+            }
+            case 'needle':
+                return material.size ? `${material.size}mm` : null;
+            default:
+                return null;
         }
     };
 
@@ -138,22 +157,44 @@ export default function ProjectCreate() {
                         ) : materials.length === 0 ? (
                             <p className="text-zinc-500 text-sm">Aucun matériel dans l'inventaire</p>
                         ) : (
-                            <div className="flex flex-wrap gap-2">
-                                {materials.map((mat) => (
-                                    <button
-                                        key={mat.id}
-                                        type="button"
-                                        onClick={() => toggleMaterial(mat.id)}
-                                        className={`px-3 py-2 rounded-xl text-sm font-medium border transition-all flex items-center gap-2 ${
-                                            selectedMaterialIds.includes(mat.id)
-                                                ? "bg-secondary border-primary text-white shadow-[0_0_10px_-3px_rgba(196,181,254,0.5)]"
-                                                : "bg-zinc-800/50 border-zinc-700 text-zinc-400 hover:border-zinc-500 hover:bg-zinc-800"
-                                        }`}
-                                    >
-                                        <span>{getIcon(mat.category_type)}</span>
-                                        <span>{mat.name}</span>
-                                    </button>
-                                ))}
+                            <div className="flex flex-col gap-3">
+                                {materials.map((mat) => {
+                                    const materialDetails = getMaterialDetails(mat);
+
+                                    return (
+                                        <button
+                                            key={mat.id}
+                                            type="button"
+                                            onClick={() => toggleMaterial(mat.id)}
+                                            className={`w-full p-3 rounded-xl border transition-all flex items-start justify-between gap-3 text-left ${
+                                                selectedMaterialIds.includes(mat.id)
+                                                    ? "bg-secondary border-primary text-white shadow-[0_0_10px_-3px_rgba(196,181,254,0.5)]"
+                                                    : "bg-zinc-800/50 border-zinc-700 text-zinc-300 hover:border-zinc-500 hover:bg-zinc-800"
+                                            }`}
+                                        >
+                                            <div className="flex items-start gap-3 min-w-0">
+                                                <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-xl shrink-0">
+                                                    {getIcon(mat.category_type)}
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <p className="font-semibold truncate">{mat.name}</p>
+                                                    {materialDetails && (
+                                                        <p className="text-xs text-zinc-400 mt-0.5">
+                                                            {materialDetails}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <div className={`w-6 h-6 rounded-full border flex items-center justify-center shrink-0 mt-1 ${
+                                                selectedMaterialIds.includes(mat.id)
+                                                    ? 'bg-primary border-primary text-background'
+                                                    : 'border-zinc-600 text-transparent'
+                                            }`}>
+                                                <Check size={14} strokeWidth={3} />
+                                            </div>
+                                        </button>
+                                    );
+                                })}
                             </div>
                         )}
                     </div>
