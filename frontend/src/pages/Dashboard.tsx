@@ -264,7 +264,7 @@ export default function Dashboard() {
                                         onPointerUp={handlePointerUp}
                                         onPointerMove={handlePointerMove}
                                         onClick={(e) => handleCardClick(proj.id, e)}
-                                        className={`relative p-4 rounded-xl border active:scale-[0.96] transition-transform flex flex-col justify-between h-32 bg-secondary select-none cursor-pointer ${proj.status === 'completed' ? 'border-green-500/30 bg-green-500/5' : 'border-zinc-800'}`}
+                                        className={`relative overflow-hidden p-4 rounded-xl border active:scale-[0.96] transition-transform flex flex-col justify-between h-32 bg-secondary select-none cursor-pointer ${proj.status === 'completed' ? 'border-green-500/30 bg-green-500/5' : 'border-zinc-800'}`}
                                     >
                                         {hasProjectCover(proj) && (
                                             <>
