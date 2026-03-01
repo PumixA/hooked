@@ -47,5 +47,7 @@ jobs:
       - name: Deploy
         run: |
           cd /opt/hooked
-          git pull origin main
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
           docker compose -f docker-compose.prod.yml up -d --build
