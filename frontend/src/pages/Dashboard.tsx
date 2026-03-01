@@ -44,7 +44,7 @@ export default function Dashboard() {
     useEffect(() => {
         refetch();
         refetchWeekly();
-    }, [location.pathname]);
+    }, [location.pathname, refetch, refetchWeekly]);
 
     useEffect(() => {
         const onFocus = () => { refetchWeekly(); refetch(); };
@@ -139,6 +139,8 @@ export default function Dashboard() {
 
     const lastProject = sortedProjects[0];
     const otherProjects = sortedProjects.slice(1);
+
+    const hasProjectCover = (project: Project) => Boolean(project.cover_base64 || project.cover_file_path);
 
     // --- RENDU ---
 
@@ -264,10 +266,26 @@ export default function Dashboard() {
                                         onClick={(e) => handleCardClick(proj.id, e)}
                                         className={`relative p-4 rounded-xl border active:scale-[0.96] transition-transform flex flex-col justify-between h-32 bg-secondary select-none cursor-pointer ${proj.status === 'completed' ? 'border-green-500/30 bg-green-500/5' : 'border-zinc-800'}`}
                                     >
-                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center mb-2 font-bold text-xs ${proj.status === 'completed' ? 'bg-green-500/20 text-green-400' : 'bg-zinc-800 text-zinc-500'}`}>
+                                        {hasProjectCover(proj) && (
+                                            <>
+                                                <img
+                                                    src={getProjectVisual(proj.cover_base64, proj.cover_file_path)}
+                                                    alt=""
+                                                    className="absolute inset-0 w-full h-full object-cover opacity-25 pointer-events-none"
+                                                    onError={(event) => {
+                                                        const target = event.currentTarget;
+                                                        if (target.src.endsWith('/logo-mini.svg')) return;
+                                                        target.src = '/logo-mini.svg';
+                                                    }}
+                                                />
+                                                <div className="absolute inset-0 bg-gradient-to-t from-background/90 via-background/50 to-background/20 pointer-events-none" />
+                                            </>
+                                        )}
+
+                                        <div className={`relative z-10 w-8 h-8 rounded-full flex items-center justify-center mb-2 font-bold text-xs ${proj.status === 'completed' ? 'bg-green-500/20 text-green-400' : 'bg-zinc-800 text-zinc-500'}`}>
                                             {proj.status === 'completed' ? <CheckCircle size={14} /> : '#'}
                                         </div>
-                                        <div>
+                                        <div className="relative z-10">
                                             <h4 className="font-bold text-sm truncate">{proj.title}</h4>
                                             <p className={`text-xs mt-1 ${proj.status === 'completed' ? 'text-green-400' : 'text-primary'}`}>
                                                 {proj.status === 'completed' ? 'Terminé' : 'En cours'}
