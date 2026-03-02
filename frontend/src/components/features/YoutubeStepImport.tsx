@@ -15,6 +15,7 @@ type ApplyMode = 'replace' | 'append';
 interface YoutubeStepImportProps {
     onApply: (steps: ProjectStep[], mode: ApplyMode) => void;
     allowAppend?: boolean;
+    debugContext?: 'project-create' | 'project-detail';
 }
 
 function getConfidenceLabel(confidence: ProjectStepConfidence | 'high' | 'medium' | undefined): string {
@@ -48,6 +49,7 @@ function formatTimestamp(seconds?: number): string {
 export default function YoutubeStepImport({
     onApply,
     allowAppend = false,
+    debugContext = 'project-detail',
 }: YoutubeStepImportProps) {
     const [youtubeUrl, setYoutubeUrl] = useState('');
     const [draftSteps, setDraftSteps] = useState<ProjectStep[]>([]);
@@ -73,7 +75,22 @@ export default function YoutubeStepImport({
         };
     }, []);
 
+    useEffect(() => {
+        console.log('[YouTubeStepImport] Network state updated', {
+            context: debugContext,
+            navigatorOnline: navigator.onLine,
+            isNetworkOffline,
+            apiOfflineMode: getOfflineMode(),
+            effectiveOffline: isOffline,
+        });
+    }, [debugContext, isNetworkOffline, isOffline]);
+
     const clearDraft = () => {
+        console.log('[YouTubeStepImport] Clearing generated draft', {
+            context: debugContext,
+            currentVideoTitle: videoTitle,
+            currentDraftStepCount: draftSteps.length,
+        });
         setDraftSteps([]);
         setVideoTitle('');
         setResultConfidence(undefined);
@@ -92,20 +109,50 @@ export default function YoutubeStepImport({
     };
 
     const removeStep = (stepIndex: number) => {
+        console.log('[YouTubeStepImport] Removing generated draft step', {
+            context: debugContext,
+            stepIndex,
+            removedStep: draftSteps[stepIndex],
+        });
         setDraftSteps((prev) => prev.filter((_, index) => index !== stepIndex));
     };
 
     const handleAnalyze = () => {
         const normalizedUrl = youtubeUrl.trim();
-        if (!normalizedUrl || generateMutation.isPending) return;
+        if (!normalizedUrl || generateMutation.isPending) {
+            console.log('[YouTubeStepImport] Analysis skipped', {
+                context: debugContext,
+                hasUrl: Boolean(normalizedUrl),
+                isPending: generateMutation.isPending,
+                isOffline,
+            });
+            return;
+        }
 
         setErrorMessage(null);
+        console.log('[YouTubeStepImport] Starting YouTube analysis', {
+            context: debugContext,
+            url: normalizedUrl,
+            allowAppend,
+            isOffline,
+        });
 
         generateMutation.mutate(normalizedUrl, {
             onSuccess: (response) => {
+                const sanitizedSteps = sanitizeProjectSteps(response.steps);
+                console.log('[YouTubeStepImport] Analysis success', {
+                    context: debugContext,
+                    url: normalizedUrl,
+                    videoTitle: response.video_title,
+                    sourceUsed: response.source_used,
+                    confidence: response.confidence,
+                    rawStepCount: response.steps.length,
+                    sanitizedStepCount: sanitizedSteps.length,
+                    firstStep: sanitizedSteps[0],
+                });
                 setVideoTitle(response.video_title);
                 setResultConfidence(response.confidence);
-                setDraftSteps(sanitizeProjectSteps(response.steps));
+                setDraftSteps(sanitizedSteps);
             },
             onError: (error) => {
                 setDraftSteps([]);
@@ -113,10 +160,22 @@ export default function YoutubeStepImport({
                 setResultConfidence(undefined);
 
                 if (axios.isAxiosError<{ message?: string }>(error)) {
+                    console.log('[YouTubeStepImport] Analysis failed with axios error', {
+                        context: debugContext,
+                        url: normalizedUrl,
+                        status: error.response?.status,
+                        responseData: error.response?.data,
+                        message: error.message,
+                    });
                     setErrorMessage(error.response?.data?.message || 'Impossible d’analyser cette vidéo.');
                     return;
                 }
 
+                console.log('[YouTubeStepImport] Analysis failed with unknown error', {
+                    context: debugContext,
+                    url: normalizedUrl,
+                    error,
+                });
                 setErrorMessage(error instanceof Error ? error.message : 'Impossible d’analyser cette vidéo.');
             },
         });
@@ -124,7 +183,21 @@ export default function YoutubeStepImport({
 
     const handleApply = () => {
         const normalizedSteps = sanitizeProjectSteps(draftSteps);
-        if (normalizedSteps.length === 0) return;
+        if (normalizedSteps.length === 0) {
+            console.log('[YouTubeStepImport] Apply skipped because draft is empty', {
+                context: debugContext,
+                applyMode,
+            });
+            return;
+        }
+
+        console.log('[YouTubeStepImport] Applying generated draft', {
+            context: debugContext,
+            applyMode,
+            videoTitle,
+            stepCount: normalizedSteps.length,
+            firstStep: normalizedSteps[0],
+        });
         onApply(normalizedSteps, applyMode);
     };
 

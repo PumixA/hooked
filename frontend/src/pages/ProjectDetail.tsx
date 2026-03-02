@@ -345,6 +345,12 @@ export default function ProjectDetail() {
     };
 
     const applyGeneratedProjectSteps = (steps: ProjectStep[], mode: 'replace' | 'append') => {
+        console.log('[ProjectDetail] Applying generated YouTube steps to draft', {
+            mode,
+            incomingStepCount: steps.length,
+            currentDraftStepCount: tempProjectSteps.length,
+            firstIncomingStep: steps[0],
+        });
         setTempProjectSteps((prev) => {
             if (mode === 'append') {
                 return [...prev, ...steps];
@@ -919,6 +925,7 @@ export default function ProjectDetail() {
                 <div className="space-y-4">
                     <YoutubeStepImport
                         allowAppend
+                        debugContext="project-detail"
                         onApply={applyGeneratedProjectSteps}
                     />
 

@@ -42,6 +42,15 @@ export default function ProjectCreate() {
         if (e) e.preventDefault();
         if (!title || createProjectMutation.isPending) return;
 
+        console.log('[ProjectCreate] Submitting project', {
+            title,
+            categoryId: selectedCategoryId,
+            goalRows: goalRows ? parseInt(goalRows) : undefined,
+            selectedMaterialIds,
+            generatedProjectStepCount: generatedProjectSteps.length,
+            firstGeneratedStep: generatedProjectSteps[0],
+        });
+
         createProjectMutation.mutate(
             {
                 title,
@@ -206,7 +215,12 @@ export default function ProjectCreate() {
 
                     <div className="space-y-3">
                         <YoutubeStepImport
+                            debugContext="project-create"
                             onApply={(steps) => {
+                                console.log('[ProjectCreate] Received generated YouTube steps', {
+                                    stepCount: steps.length,
+                                    firstStep: steps[0],
+                                });
                                 setGeneratedProjectSteps(steps);
                             }}
                         />
@@ -223,7 +237,12 @@ export default function ProjectCreate() {
                                     type="button"
                                     variant="ghost"
                                     className="justify-start px-0 py-0 h-auto w-auto text-red-400"
-                                    onClick={() => setGeneratedProjectSteps([])}
+                                    onClick={() => {
+                                        console.log('[ProjectCreate] Clearing imported YouTube steps', {
+                                            previousStepCount: generatedProjectSteps.length,
+                                        });
+                                        setGeneratedProjectSteps([]);
+                                    }}
                                 >
                                     Retirer les étapes importées
                                 </Button>
