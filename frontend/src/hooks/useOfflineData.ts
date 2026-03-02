@@ -10,6 +10,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { localDb, generateLocalId, type LocalProject, type LocalMaterial } from '../services/localDb';
 import { syncService } from '../services/syncService';
+import type { ProjectStep } from '../services/projectSteps';
 
 // === HELPER: Verifier si la sync est possible ===
 function canSync(): boolean {
@@ -46,7 +47,14 @@ export function useCreateProject() {
     const queryClient = useQueryClient();
 
     return useMutation({
-        mutationFn: async (data: { title: string; goal_rows?: number; category_id?: string; material_ids?: string[] }) => {
+        mutationFn: async (data: {
+            title: string;
+            goal_rows?: number;
+            category_id?: string;
+            material_ids?: string[];
+            project_steps?: ProjectStep[];
+            active_step_index?: number;
+        }) => {
             const localId = generateLocalId();
             const project = await localDb.saveProject({
                 id: localId,
@@ -54,6 +62,8 @@ export function useCreateProject() {
                 goal_rows: data.goal_rows,
                 category_id: data.category_id,
                 material_ids: data.material_ids,
+                project_steps: data.project_steps,
+                active_step_index: data.active_step_index,
                 current_row: 0,
                 status: 'in_progress',
                 _isLocal: true,

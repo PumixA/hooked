@@ -11,12 +11,19 @@ import { randomUUID } from 'crypto';
 
 const pump = util.promisify(pipeline);
 
+const projectStepSourceSchema = z.enum(['chapter', 'subtitle', 'whisper']);
+const projectStepConfidenceSchema = z.enum(['high', 'medium', 'low']);
+
 const projectStepSchema = z.object({
     id: z.string().min(1).optional(),
     title: z.string().min(1).max(80),
     target_rows: z.number().int().positive().optional().nullable(),
     current_rows: z.number().int().min(0).optional(),
-    instruction: z.string().max(240).optional().nullable()
+    instruction: z.string().max(500).optional().nullable(),
+    source: projectStepSourceSchema.optional(),
+    confidence: projectStepConfidenceSchema.optional(),
+    start_seconds: z.number().min(0).optional(),
+    end_seconds: z.number().min(0).optional(),
 });
 
 type ProjectStepInput = z.infer<typeof projectStepSchema>;
@@ -29,7 +36,11 @@ function normalizeProjectSteps(steps: ProjectStepInput[] | null | undefined): Pr
         title: step.title.trim(),
         target_rows: step.target_rows ? Math.floor(step.target_rows) : null,
         current_rows: Math.max(0, Math.floor(step.current_rows ?? 0)),
-        instruction: step.instruction?.trim() || undefined
+        instruction: step.instruction?.trim() || undefined,
+        source: step.source,
+        confidence: step.confidence,
+        start_seconds: typeof step.start_seconds === 'number' ? step.start_seconds : undefined,
+        end_seconds: typeof step.end_seconds === 'number' ? step.end_seconds : undefined,
     }));
 }
 

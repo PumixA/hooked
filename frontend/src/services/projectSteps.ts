@@ -1,14 +1,29 @@
+export type ProjectStepSource = 'chapter' | 'subtitle' | 'whisper';
+export type ProjectStepConfidence = 'high' | 'medium' | 'low';
+
 export interface ProjectStep {
   id: string;
   title: string;
   target_rows?: number | null;
   current_rows: number;
   instruction?: string;
+  source?: ProjectStepSource;
+  confidence?: ProjectStepConfidence;
+  start_seconds?: number;
+  end_seconds?: number;
 }
 
 function toFiniteNumber(value: unknown): number | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   return value;
+}
+
+function isProjectStepSource(value: unknown): value is ProjectStepSource {
+  return value === 'chapter' || value === 'subtitle' || value === 'whisper';
+}
+
+function isProjectStepConfidence(value: unknown): value is ProjectStepConfidence {
+  return value === 'high' || value === 'medium' || value === 'low';
 }
 
 export function sanitizeProjectSteps(input: unknown): ProjectStep[] {
@@ -24,9 +39,15 @@ export function sanitizeProjectSteps(input: unknown): ProjectStep[] {
       const currentRows = toFiniteNumber(source.current_rows) ?? 0;
       const instruction = typeof source.instruction === 'string' ? source.instruction.trim() : '';
       const providedId = typeof source.id === 'string' ? source.id.trim() : '';
+      const stepSource = isProjectStepSource(source.source) ? source.source : undefined;
+      const confidence = isProjectStepConfidence(source.confidence) ? source.confidence : undefined;
+      const startSeconds = toFiniteNumber(source.start_seconds);
+      const endSeconds = toFiniteNumber(source.end_seconds);
 
       if (!title) return null;
       const normalizedTargetRows = targetRows && targetRows > 0 ? Math.floor(targetRows) : null;
+      const normalizedStartSeconds = startSeconds !== null && startSeconds >= 0 ? startSeconds : undefined;
+      const normalizedEndSeconds = endSeconds !== null && endSeconds >= 0 ? endSeconds : undefined;
 
       return {
         id: providedId || `step-${index + 1}`,
@@ -34,6 +55,10 @@ export function sanitizeProjectSteps(input: unknown): ProjectStep[] {
         target_rows: normalizedTargetRows,
         current_rows: Math.max(0, Math.floor(currentRows)),
         instruction: instruction || undefined,
+        source: stepSource,
+        confidence,
+        start_seconds: normalizedStartSeconds,
+        end_seconds: normalizedEndSeconds,
       } as ProjectStep;
     })
     .filter((step): step is ProjectStep => step !== null);

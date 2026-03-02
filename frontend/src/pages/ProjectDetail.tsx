@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Camera, StickyNote, Minus, Plus, Loader2, Settings, TrendingUp, ImagePlus, Trash2, CheckCircle, Flag, X, ChevronLeft, ChevronRight, Check, Package, RotateCcw, ListOrdered } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import Timer from '../components/features/Timer';
+import YoutubeStepImport from '../components/features/YoutubeStepImport';
 import Modal from '../components/ui/Modal';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
@@ -341,6 +342,19 @@ export default function ProjectDetail() {
 
     const removeProjectStep = (stepIndex: number) => {
         setTempProjectSteps((prev) => prev.filter((_, index) => index !== stepIndex));
+    };
+
+    const applyGeneratedProjectSteps = (steps: ProjectStep[], mode: 'replace' | 'append') => {
+        setTempProjectSteps((prev) => {
+            if (mode === 'append') {
+                return [...prev, ...steps];
+            }
+
+            return steps;
+        });
+        setToastMessage(mode === 'append'
+            ? 'Brouillon YouTube ajoute. Enregistrez pour valider.'
+            : 'Brouillon YouTube charge. Enregistrez pour valider.');
     };
 
     const updateCounter = useCallback((increment: number) => {
@@ -903,6 +917,11 @@ export default function ProjectDetail() {
             {/* MODALS */}
             <Modal isOpen={showStepsManager} onClose={() => setShowStepsManager(false)} title="Étapes">
                 <div className="space-y-4">
+                    <YoutubeStepImport
+                        allowAppend
+                        onApply={applyGeneratedProjectSteps}
+                    />
+
                     {tempProjectSteps.length === 0 ? (
                         <p className="text-sm text-zinc-400">
                             Crée des étapes pour avoir un compteur par section (ex: Côtes, Corps, Manches).

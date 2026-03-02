@@ -11,6 +11,7 @@ import { PrismaClient } from '@prisma/client';
 import { authRoutes } from './routes/auth';
 import { usersRoutes } from './routes/users';
 import { projectsRoutes } from './routes/projects';
+import { projectStepGenerationRoutes } from './routes/projectStepGeneration';
 import { materialsRoutes } from './routes/materials';
 import { sessionsRoutes } from './routes/sessions';
 import { photosRoutes } from './routes/photos';
@@ -67,6 +68,7 @@ const start = async () => {
     await server.register(authRoutes, { prefix: '/auth' });
     await server.register(usersRoutes, { prefix: '/users' });
     await server.register(projectsRoutes, { prefix: '/projects' });
+    await server.register(projectStepGenerationRoutes, { prefix: '/projects/steps' });
     await server.register(materialsRoutes, { prefix: '/materials' });
     await server.register(sessionsRoutes, { prefix: '/sessions' });
     await server.register(photosRoutes, { prefix: '/photos' });

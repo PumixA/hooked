@@ -3,7 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Check, Loader2 } from 'lucide-react';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
+import YoutubeStepImport from '../components/features/YoutubeStepImport';
 import { useCreateProject, useCategories, useMaterials } from '../hooks/useOfflineData';
+import type { ProjectStep } from '../services/projectSteps';
 
 export default function ProjectCreate() {
     const navigate = useNavigate();
@@ -13,6 +15,7 @@ export default function ProjectCreate() {
     const [goalRows, setGoalRows] = useState('');
     const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
     const [selectedMaterialIds, setSelectedMaterialIds] = useState<string[]>([]);
+    const [generatedProjectSteps, setGeneratedProjectSteps] = useState<ProjectStep[]>([]);
 
     // OFFLINE-FIRST: Utilisation des hooks locaux
     const { data: categories = [], isLoading: isLoadingCategories } = useCategories();
@@ -45,6 +48,8 @@ export default function ProjectCreate() {
                 category_id: selectedCategoryId || undefined,
                 goal_rows: goalRows ? parseInt(goalRows) : undefined,
                 material_ids: selectedMaterialIds.length > 0 ? selectedMaterialIds : undefined,
+                project_steps: generatedProjectSteps.length > 0 ? generatedProjectSteps : undefined,
+                active_step_index: generatedProjectSteps.length > 0 ? 0 : undefined,
             },
             {
                 onSuccess: (project) => {
@@ -195,6 +200,33 @@ export default function ProjectCreate() {
                                         </button>
                                     );
                                 })}
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="space-y-3">
+                        <YoutubeStepImport
+                            onApply={(steps) => {
+                                setGeneratedProjectSteps(steps);
+                            }}
+                        />
+
+                        {generatedProjectSteps.length > 0 && (
+                            <div className="rounded-2xl border border-primary/30 bg-primary/5 p-4 space-y-2">
+                                <p className="text-sm font-semibold text-white">
+                                    {generatedProjectSteps.length} étape(s) prêtes pour ce projet
+                                </p>
+                                <p className="text-xs text-zinc-400">
+                                    Si vous modifiez le brouillon ci-dessus, cliquez à nouveau sur "Utiliser ces étapes" avant de créer le projet.
+                                </p>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    className="justify-start px-0 py-0 h-auto w-auto text-red-400"
+                                    onClick={() => setGeneratedProjectSteps([])}
+                                >
+                                    Retirer les étapes importées
+                                </Button>
                             </div>
                         )}
                     </div>
